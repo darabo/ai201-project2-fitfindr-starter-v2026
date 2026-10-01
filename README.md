@@ -13,8 +13,8 @@
 > python app.py ask 'vintage graphic tee under $30'
 > ```
 >
-> All three tools are stubs, so that last command will do nothing useful yet.
-> That's the starting position.
+> All three tools and the planning loop are built. That last command runs the
+> whole agent.
 >
 > **The rest of this file is your submission.** Fill it in as you go.
 
@@ -74,9 +74,11 @@ FitFindr takes a plain-language thrifting request like `vintage graphic tee unde
 
 **Where it lives:** `agent.py::run_agent`
 
+**Second branch (stretch, see Stretch Features):** If the parsed description has no searchable keywords left (e.g. `size M under $30`), put a message in `session["error"]` asking what kind of item the user wants, and stop *before* `search_listings`. Otherwise, go on to search. This is also in `agent.py::run_agent`.
+
 **How the query is parsed:** Regex, in `agent.py::parse_query`. `$<number>` (optionally after "under"/"below"/"max") becomes `max_price`; `size <token>` becomes `size` (uppercased); filler words like "looking for" are removed and whatever is left is the `description`.
 
-**What moves through the session:** `query` → `parsed` (description, size, max*price) → `search_results` → *(branch)* → `selected_item` → `outfit_suggestion` → `fit_card`. Before each model tool runs, the id of the item it receives is written to `session["tool_inputs"]` (`{"suggest_outfit": "lst*…", "create*fit_card": "lst*…"}`), so criterion 3 can check that the searched item is the item each tool got. On the empty path, `error`is set and`selected_item`, `outfit_suggestion`, and `fit_card`stay`None`. Each tool reads its inputs back out of the session, not from local variables.
+**What moves through the session:** `query` → `parsed` (description, size, max_price) → *(branch 2)* → `search_results` → *(branch 1)* → `selected_item` → `outfit_suggestion` → `fit_card`. Before each model tool runs, the id of the item it receives is written to `session["tool_inputs"]` (`{"suggest_outfit": "lst_…", "create_fit_card": "lst_…"}`), so criterion 3 can check that the searched item is the item each tool got. `session["steps"]` lists every step that ran, in order. On either early stop, `error` is set and `selected_item`, `outfit_suggestion`, and `fit_card` stay `None`. Each tool reads its inputs back out of the session, not from local variables.
 
 ---
 
@@ -173,7 +175,48 @@ Can't write a fit card without an outfit suggestion — suggest_outfit returned 
 - **Why it's a separate branch from the empty search:** the empty-search branch runs the search and then stops because nothing matched. This one never searches, because there's nothing to search for. Without it, `search_listings('')` returns `[]`, and the user gets told to "use broader words" for a query that had no words in it.
 - **What it changes:** `agent.py::run_agent` gets a second `if`, between parsing and searching. The session gets a `steps` list so a run log shows which steps ran.
 
-*Status: declared, not built yet.*
+*Status: built.* It was declared in commit `8f91e6a` and built in `2564f3a`.
+
+**What it changed:**
+- `agent.py::run_agent` has a second `if`, right after `parse_query`. If `_keywords(session["parsed"]["description"])` is empty, it sets `session["error"]` from `_too_vague_message` and returns, so `search_listings` never runs.
+- `agent.py::parse_query` now also strips vague filler ("something", "anything", "cheap", "stuff", "items"…). Before, "something in size M" searched for the word "something", matched nothing, and took the wrong branch.
+- The session has a `steps` list recording each step that ran. The run log below is read from it.
+
+**Run log — the second branch taken:**
+
+```
+$ python app.py ask 'something in size M under $30'
+
+  I got size M and under $30, but couldn't tell what kind of item you want. Add a word or two about the item itself — e.g. 'graphic tee', 'denim jacket', or 'leather bag' — and I'll search again.
+
+0 model calls this session
+```
+
+**Run log — all three paths side by side**, read from `session["steps"]`:
+
+```
+$ python -c "
+from agent import run_agent
+from utils.data_loader import get_example_wardrobe
+for q in ['something in size M under \$30', 'designer ballgown size XXS under \$5', 'vintage graphic tee under \$30']:
+    s = run_agent(q, get_example_wardrobe())
+    print(repr(q)); print('  steps:      ', s['steps']); print('  tool_inputs:', s['tool_inputs']); print('  fit_card is None:', s['fit_card'] is None)"
+
+'something in size M under $30'
+  steps:       ['parse_query', 'stop: query too vague']
+  tool_inputs: {}
+  fit_card is None: True
+'designer ballgown size XXS under $5'
+  steps:       ['parse_query', 'search_listings', 'stop: no listings matched']
+  tool_inputs: {}
+  fit_card is None: True
+'vintage graphic tee under $30'
+  steps:       ['parse_query', 'search_listings', 'suggest_outfit', 'create_fit_card']
+  tool_inputs: {'suggest_outfit': 'lst_033', 'create_fit_card': 'lst_033'}
+  fit_card is None: False
+```
+
+The second branch stops before `search_listings`. The empty-search branch stops after it. The happy path runs all three tools.
 
 ---
 
