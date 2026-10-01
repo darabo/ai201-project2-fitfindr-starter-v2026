@@ -39,117 +39,122 @@
 
 ## What This Does
 
-<!-- Three or four sentences: what a user asks for, and what they get back. -->
-
-
+FitFindr takes a plain-language thrifting request like `vintage graphic tee under $30, size M` and turns it into a search over 40 secondhand listings, filtering by keywords, size, and a price ceiling. It takes the best match and asks the model to style it with pieces from the user's wardrobe (or with common basics if the wardrobe is empty). Then it writes a short, postable caption — a "fit card" — that names the item, its price, and its platform. If nothing matches, it stops before any model call and tells the user which part of the request to loosen.
 
 ---
 
 ## Tool Inventory
 
-<!-- Four lines per tool. This is worth 2 points and it's the single most
-     common place students lose them.
-
-     "Returns a list" earns NOTHING. The description has to say what is IN
-     the list.
-
-     The empty case isn't optional either — it's the thing your loop branches
-     on, and if you don't decide it here you'll discover it as a crash in
-     Milestone 5. -->
-
 ### `search_listings`
 
-- **What it does:**
-- **Inputs:** <!-- name and type each: `max_price` (float), not "a price" -->
-- **Returns:**
-- **When it has nothing:**
+- **What it does:** Filters `data/listings.json` by price and size, then ranks what's left by keyword overlap with the description (title hits count double) and returns the best matches.
+- **Inputs:** `description` (str), `size` (str | None — None skips size filtering), `max_price` (float | None — inclusive; None skips price filtering)
+- **Returns:** A `list[dict]` of at most 10 listing dicts (`config.SEARCH_RESULT_LIMIT`), best match first, ties broken by lower price. Each dict has `id`, `title`, `description`, `category`, `style_tags` (list), `size`, `condition`, `price` (float), `colors` (list), `brand` (str or None), `platform`. **Size rule:** listing sizes are split on `/`, anything in parentheses is ignored, and comparison is case-insensitive on whole tokens — so `M` matches `S/M` and `M/L`, `S` does **not** match `US 9`, `L` does **not** match `XL`, and any `One Size` listing matches every size. `W30` does not match `W30 L30` (whole token only).
+- **When it has nothing:** An empty list `[]` — never `None`, never an exception. Also `[]` if the description has no usable keywords.
 
 ### `suggest_outfit`
 
-- **What it does:**
-- **Inputs:**
-- **Returns:**
-- **When it has nothing:**
+- **What it does:** Asks the model for one or two outfits that pair the new item with pieces the user already owns, naming those pieces exactly as they appear in the wardrobe.
+- **Inputs:** `new_item` (dict — a listing dict from `search_listings`), `wardrobe` (dict — `{"items": [...]}` where each item has `id`, `name`, `category`, `colors`, `style_tags`, `notes`)
+- **Returns:** A non-empty `str` of plain-text outfit suggestions, roughly under 120 words.
+- **When it has nothing:** If `wardrobe["items"]` is empty, it does not fail — it asks the model for two outfits built from common basics and returns that `str`. If the model returns blank text, it returns a one-line fallback (`"Pair the <title> with simple basics in neutral colors."`).
 
 ### `create_fit_card`
 
-- **What it does:**
-- **Inputs:**
-- **Returns:**
-- **When it has nothing:**
+- **What it does:** Asks the model for a casual 2–4 sentence social caption about the find that mentions the item, price, and platform once each, with at most two emoji and two hashtags.
+- **Inputs:** `outfit` (str — the output of `suggest_outfit`), `new_item` (dict — the same listing dict)
+- **Returns:** A `str` caption of 2–4 sentences.
+- **When it has nothing:** If `outfit` is empty or whitespace, it returns the string `"Can't write a fit card without an outfit suggestion — suggest_outfit returned nothing."` without calling the model.
 
 ---
 
 ## Planning Loop
 
-<!-- Your branch rule, stated as a rule — the condition AND both paths — plus
-     the file and function that holds it.
-
-     Like this:
-       "If search_listings returns an empty list, put a message in the session
-        and stop. Otherwise take the first result and go to suggest_outfit."
-        — agent.py::run_agent
-
-     The grader checks your code against what you claim here, so the file and
-     function have to be real. -->
-
-**Branch rule:**
+**Branch rule:** If `search_listings` returns an empty list, put a message in `session["error"]` that names what to change (raise the max price, drop the size filter, or use broader words) and stop — `suggest_outfit` and `create_fit_card` are never called. Otherwise, take the first result as `session["selected_item"]`, go to `suggest_outfit`, then `create_fit_card`.
 
 **Where it lives:** `agent.py::run_agent`
 
-**How the query is parsed:** <!-- regex, string splitting, or asking the model — say which -->
+**How the query is parsed:** Regex, in `agent.py::parse_query`. `$<number>` (optionally after "under"/"below"/"max") becomes `max_price`; `size <token>` becomes `size` (uppercased); filler words like "looking for" are removed and whatever is left is the `description`.
 
-**What moves through the session:** <!-- which fields, in what order -->
+**What moves through the session:** `query` → `parsed` (description, size, max_price) → `search_results` → *(branch)* → `selected_item` → `outfit_suggestion` → `fit_card`. On the empty path, `error` is set and `selected_item`, `outfit_suggestion`, and `fit_card` stay `None`. Each tool reads its inputs back out of the session, not from local variables.
 
 ---
 
 ## Sample Run
 
-<!-- Two things go here.
-
-     1. One FULL query and its output, pasted as text.
-     2. Your three per-tool terminal tests — the command and what it printed. -->
-
 **One full query**
 
 ```
-$ python app.py ask '...'
+$ python app.py ask 'vintage graphic tee under $30, size M'
 
+  Found:    Y2K Baby Tee — Butterfly Print — $18.0 on depop
+
+  Outfit:   Hey there! Grab that butterfly baby tee—at $18, it's a total steal and fits right into your Y2K collection.
+
+Outfit one: Balance the tiny tee's pink and purple tones with your baggy straight-leg jeans and chunky white sneakers. Throw on your vintage black denim jacket for that classic contrast, and you are ready for a casual coffee run.
+
+Outfit two: Lean into the cottagecore side of the top by pairing it with your wide-leg khaki trousers and brown leather belt. Slip into your black combat boots for a cool grunge-meets-sweet balance, and carry your black crossbody bag to finish the look. So cute and easy!
+
+  Fit card: Found the ultimate Y2K butterfly baby tee on Depop for just $18. Obsessed with this pink and purple print for casual coffee runs or grunge-meets-sweet fits. Grab it before I change my mind and keep it! 🦋✨
+
+#depop #y2kstyle
+
+2 model calls this session, 506 prompt + 202 output tokens
+```
+
+**The branch — a query that matches nothing**
+
+```
+$ python app.py ask 'designer ballgown size XXS under $5'
+  No listings matched 'designer ballgown' in size XXS under $5. Try to raise your max price above $5, or drop the size XXS filter, or use broader words (e.g. 'jacket' or 'tee' instead of a specific style).
+
+0 model calls this session
 ```
 
 **The three tools, tested one at a time**
 
 ```
-$ python -c "from tools import search_listings; print(search_listings('graphic tee', max_price=30))"
+$ python -c "from tools import search_listings; r=search_listings('graphic tee', max_price=30); print(len(r)); [print(x['id'], x['title'], x['size'], x['price'], x['platform']) for x in r]"
+6
+lst_006 Graphic Tee — 2003 Tour Bootleg Style L 24.0 depop
+lst_002 Y2K Baby Tee — Butterfly Print S/M 18.0 depop
+lst_033 Vintage Band Tee — Faded Grey L 19.0 depop
+lst_017 Mesh Long-Sleeve Top — Black S/M 15.0 depop
+lst_015 Vintage Graphic Hoodie — Faded Black L 26.0 depop
+lst_011 Low-Rise Cargo Pants — Khaki W29 27.0 poshmark
 
+$ python -c "from tools import search_listings; print(search_listings('ballgown', size='XXS', max_price=5))"
+[]
 ```
 
 ```
-$ python -c "from tools import suggest_outfit; ..."
+$ python -c "from tools import suggest_outfit; from utils.data_loader import get_example_wardrobe, load_listings; print(suggest_outfit(load_listings()[0], get_example_wardrobe()))"
+Hey there! At thirty-eight bucks, those vintage Levi's are a total steal and will fit right into your closet. Since you already own baggy dark jeans, these medium-wash straight legs will give you a great lighter denim option. Here are two easy ways to style them:
 
+Outfit 1 (Casual Streetwear): Pair your new vintage Levi's 501 Jeans — Medium Wash with the white ribbed tank top, black cropped zip hoodie layered on top, and chunky white sneakers. Add the black crossbody bag to finish the look.
+
+Outfit 2 (Cozy Vintage): Wear the vintage Levi's 501 Jeans — Medium Wash with the oversized grey crewneck sweatshirt, brown leather belt, and black combat boots. Throw on the vintage black denim jacket if you need an extra layer!
 ```
 
 ```
-$ python -c "from tools import create_fit_card; ..."
+$ python -c "from tools import create_fit_card; from utils.data_loader import load_listings; print(create_fit_card('jeans and white sneakers', load_listings()[0]))"
+Nothing beats a worn-in pair of vintage Levi's 501 jeans styled with clean white sneakers for that effortless 90s off-duty look. Snagged this medium wash pair for just $38.00 and they fit like an absolute dream. Catch me listing these over on depop soon because my closet is out of room. 👖✨ #VintageDenim #DepopFinds
 
+$ python -c "from tools import create_fit_card; from utils.data_loader import load_listings; print(create_fit_card('   ', load_listings()[0]))"
+Can't write a fit card without an outfit suggestion — suggest_outfit returned nothing.
 ```
 
 ---
 
 ## How I Used AI
 
-<!-- Two specific moments. What you asked, what came back, what you changed.
-
-     "I used Claude to help me code" is not enough.
-
-     "I gave Claude my search_listings spec. It returned None on no match
-     instead of an empty list, so I changed it" is the level we want. -->
+<!-- TODO (Dara): rewrite these in your own words — the grader wants YOUR moments. -->
 
 **Moment 1**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- *What I asked for:* I'd written helper functions for `search_listings` (`_keywords`, `_size_tokens`, `_size_matches`) and asked Claude to help fix the bugs in `tools.py`, which wouldn't import.
+- *What came back:* It found three bugs: I'd pasted the helpers between the `def search_listings(...)` line and its docstring (an `IndentationError`), `re` was never imported, and `p.strip().upper` was missing its `()` — so every size token was a method object and no size could ever match.
+- *What I changed:* Moved the helpers above the function, added `import re`, added the `()`, and checked that `S` no longer matches `US 9` and `L` no longer matches `XL`.
 
 **Moment 2**
 
