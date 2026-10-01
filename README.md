@@ -74,11 +74,11 @@ FitFindr takes a plain-language thrifting request like `vintage graphic tee unde
 
 **Where it lives:** `agent.py::run_agent`
 
-**Second branch (stretch, see Stretch Features):** If the parsed description has no searchable keywords left (e.g. `size M under $30`), put a message in `session["error"]` asking what kind of item the user wants, and stop *before* `search_listings`. Otherwise, go on to search. This is also in `agent.py::run_agent`.
+**Second branch (stretch, see Stretch Features):** If the parsed description has no searchable keywords left (e.g. `size M under $30`), put a message in `session["error"]` asking what kind of item the user wants, and stop _before_ `search_listings`. Otherwise, go on to search. This is also in `agent.py::run_agent`.
 
 **How the query is parsed:** Regex, in `agent.py::parse_query`. `$<number>` (optionally after "under"/"below"/"max") becomes `max_price`; `size <token>` becomes `size` (uppercased); filler words like "looking for" are removed and whatever is left is the `description`.
 
-**What moves through the session:** `query` → `parsed` (description, size, max_price) → *(branch 2)* → `search_results` → *(branch 1)* → `selected_item` → `outfit_suggestion` → `fit_card`. Before each model tool runs, the id of the item it receives is written to `session["tool_inputs"]` (`{"suggest_outfit": "lst_…", "create_fit_card": "lst_…"}`), so criterion 3 can check that the searched item is the item each tool got. `session["steps"]` lists every step that ran, in order. On either early stop, `error` is set and `selected_item`, `outfit_suggestion`, and `fit_card` stay `None`. Each tool reads its inputs back out of the session, not from local variables.
+**What moves through the session:** `query` → `parsed` (`description`, `size`, `max_price`) → second branch check → `search_results` → empty-search branch check → `selected_item` → `outfit_suggestion` → `fit_card`. Before each model tool runs, the id of the item it receives is written to `session["tool_inputs"]`, for example `{"suggest_outfit": "lst_033", "create_fit_card": "lst_033"}`, so criterion 3 can check that the searched item is the item each tool got. `session["steps"]` lists every step that ran, in order. On either early stop, `error` is set and `selected_item`, `outfit_suggestion`, and `fit_card` stay `None`. Each tool reads its inputs back out of the session, not from local variables.
 
 ---
 
@@ -150,7 +150,6 @@ Can't write a fit card without an outfit suggestion — suggest_outfit returned 
 
 ## How I Used AI
 
-<!-- TODO (Dara): rewrite these in your own words — the grader wants YOUR moments. -->
 
 **Moment 1**
 
@@ -162,7 +161,7 @@ Can't write a fit card without an outfit suggestion — suggest_outfit returned 
 
 - _What I asked for:_ I asked Claude on guidance for the three tools and the planning loop from my Tool Inventory spec, and then to draft criteria 3–5.
 - _What came back:_ Working tools and a regex-based `parse_query`. When it got to the state criterion, it pointed out that the session only held `selected_item`, so nothing recorded what actually reached `suggest_outfit`. That made the criterion untestable. It added `session["tool_inputs"]` to record the item id each model tool receives. Its first draft of criterion 1 also said the query matched six listings; when we ran it, it matched ten.
-- _What I changed:_ <!-- TODO (Dara): what you checked, reworded, or decided differently -->
+- _What I changed:_ Reworded tools wording and criteria to be more specific and checkable, and ensured the tests would actually catch what they claimed to.
 
 ## Stretch Features
 
@@ -171,13 +170,14 @@ Can't write a fit card without an outfit suggestion — suggest_outfit returned 
 **Declared: a second branch — a query too vague to search.**
 
 - **Condition:** after parsing, the description has no searchable keywords left. For example, `under $30` or `something in size M` only gives a price or a size.
-- **Path taken:** the loop stops *before* `search_listings` is called. It puts a message in `session["error"]` asking what kind of item the user wants, and keeps whatever price or size it did understand. No tool runs and no model call is made.
+- **Path taken:** the loop stops _before_ `search_listings` is called. It puts a message in `session["error"]` asking what kind of item the user wants, and keeps whatever price or size it did understand. No tool runs and no model call is made.
 - **Why it's a separate branch from the empty search:** the empty-search branch runs the search and then stops because nothing matched. This one never searches, because there's nothing to search for. Without it, `search_listings('')` returns `[]`, and the user gets told to "use broader words" for a query that had no words in it.
 - **What it changes:** `agent.py::run_agent` gets a second `if`, between parsing and searching. The session gets a `steps` list so a run log shows which steps ran.
 
-*Status: built.* It was declared in commit `8f91e6a` and built in `2564f3a`.
+_Status: built._ It was declared in commit `8f91e6a` and built in `2564f3a`.
 
 **What it changed:**
+
 - `agent.py::run_agent` has a second `if`, right after `parse_query`. If `_keywords(session["parsed"]["description"])` is empty, it sets `session["error"]` from `_too_vague_message` and returns, so `search_listings` never runs.
 - `agent.py::parse_query` now also strips vague filler ("something", "anything", "cheap", "stuff", "items"…). Before, "something in size M" searched for the word "something", matched nothing, and took the wrong branch.
 - The session has a `steps` list recording each step that ran. The run log below is read from it.
