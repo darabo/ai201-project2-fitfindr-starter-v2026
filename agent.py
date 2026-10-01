@@ -46,6 +46,7 @@ def new_session(query: str, wardrobe: dict) -> dict:
         "outfit_suggestion": None,   # what suggest_outfit returned
         "fit_card": None,            # what create_fit_card returned
         "error": None,               # set when the run ended early
+        "tool_inputs": {},           # item id each model tool actually received
     }
 
 
@@ -180,6 +181,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     # Step 3 — outfit, read back out of the session.
     count += 1
     trace.check_iterations(count)
+    session["tool_inputs"]["suggest_outfit"] = session["selected_item"]["id"]
     session["outfit_suggestion"] = suggest_outfit(
         session["selected_item"], session["wardrobe"]
     )
@@ -187,6 +189,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     # Step 4 — fit card, read back out of the session.
     count += 1
     trace.check_iterations(count)
+    session["tool_inputs"]["create_fit_card"] = session["selected_item"]["id"]
     session["fit_card"] = create_fit_card(
         session["outfit_suggestion"], session["selected_item"]
     )

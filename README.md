@@ -76,7 +76,7 @@ FitFindr takes a plain-language thrifting request like `vintage graphic tee unde
 
 **How the query is parsed:** Regex, in `agent.py::parse_query`. `$<number>` (optionally after "under"/"below"/"max") becomes `max_price`; `size <token>` becomes `size` (uppercased); filler words like "looking for" are removed and whatever is left is the `description`.
 
-**What moves through the session:** `query` → `parsed` (description, size, max_price) → `search_results` → *(branch)* → `selected_item` → `outfit_suggestion` → `fit_card`. On the empty path, `error` is set and `selected_item`, `outfit_suggestion`, and `fit_card` stay `None`. Each tool reads its inputs back out of the session, not from local variables.
+**What moves through the session:** `query` → `parsed` (description, size, max*price) → `search_results` → *(branch)* → `selected_item` → `outfit_suggestion` → `fit_card`. Before each model tool runs, the id of the item it receives is written to `session["tool_inputs"]` (`{"suggest_outfit": "lst*…", "create*fit_card": "lst*…"}`), so criterion 3 can check that the searched item is the item each tool got. On the empty path, `error`is set and`selected_item`, `outfit_suggestion`, and `fit_card`stay`None`. Each tool reads its inputs back out of the session, not from local variables.
 
 ---
 
@@ -152,15 +152,15 @@ Can't write a fit card without an outfit suggestion — suggest_outfit returned 
 
 **Moment 1**
 
-- *What I asked for:* I'd written helper functions for `search_listings` (`_keywords`, `_size_tokens`, `_size_matches`) and asked Claude to help fix the bugs in `tools.py`, which wouldn't import.
-- *What came back:* It found three bugs: I'd pasted the helpers between the `def search_listings(...)` line and its docstring (an `IndentationError`), `re` was never imported, and `p.strip().upper` was missing its `()` — so every size token was a method object and no size could ever match.
-- *What I changed:* Moved the helpers above the function, added `import re`, added the `()`, and checked that `S` no longer matches `US 9` and `L` no longer matches `XL`.
+- _What I asked for:_ I'd written helper functions for `search_listings` (`_keywords`, `_size_tokens`, `_size_matches`) and asked Claude to help fix the bugs in `tools.py`, which wouldn't import.
+- _What came back:_ It found three bugs: I'd pasted the helpers between the `def search_listings(...)` line and its docstring (an `IndentationError`), `re` was never imported, and `p.strip().upper` was missing its `()` — so every size token was a method object and no size could ever match.
+- _What I changed:_ Moved the helpers above the function, added `import re`, added the `()`, and checked that `S` no longer matches `US 9` and `L` no longer matches `XL`.
 
 **Moment 2**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- _What I asked for:_ I asked Claude on guidance for the three tools and the planning loop from my Tool Inventory spec, and then to draft criteria 3–5.
+- _What came back:_ Working tools and a regex-based `parse_query`. When it got to the state criterion, it pointed out that the session only held `selected_item`, so nothing recorded what actually reached `suggest_outfit`. That made the criterion untestable. It added `session["tool_inputs"]` to record the item id each model tool receives. Its first draft of criterion 1 also said the query matched six listings; when we ran it, it matched ten.
+- _What I changed:_ <!-- TODO (Dara): what you checked, reworded, or decided differently -->
 
 <!-- ═══════════════════════ UNIT 4 — THE TEST ═══════════════════════
 
@@ -181,12 +181,12 @@ Can't write a fit card without an outfit suggestion — suggest_outfit returned 
      into results/. Paste it here and fill in the verdicts. -->
 
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
-|---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| --------- | ------ | ----- | ----- | ----- | ----- | ----- | ------- |
+| 1.        |        |       |       |       |       |       |         |
+| 2.        |        |       |       |       |       |       |         |
+| 3.        |        |       |       |       |       |       |         |
+| 4.        |        |       |       |       |       |       |         |
+| 5.        |        |       |       |       |       |       |         |
 
 **Real output from one try**, pasted as text, naming the file and function
 that produced it:
@@ -215,17 +215,15 @@ that produced it:
      Look for a pattern. Three misses on the same tool is one problem, not
      three. -->
 
-| # | Criterion | Target | Verdict | How I decided |
-|---|---|---|---|---|
-| 1 |  |  |  |  |
-| 2 |  |  |  |  |
-| 3 |  |  |  |  |
-| 4 |  |  |  |  |
-| 5 |  |  |  |  |
+| #   | Criterion | Target | Verdict | How I decided |
+| --- | --------- | ------ | ------- | ------------- |
+| 1   |           |        |         |               |
+| 2   |           |        |         |               |
+| 3   |           |        |         |               |
+| 4   |           |        |         |               |
+| 5   |           |        |         |               |
 
 **Diagnoses**
-
-
 
 ---
 
@@ -258,8 +256,6 @@ behaved differently afterwards. If the rewire didn't work, say exactly where it
 broke — the error text and the last thing that worked. That earns the point in
 full. -->
 
-
-
 ---
 
 ## The Improvement
@@ -276,19 +272,17 @@ full. -->
 ### Run Log — After
 
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
-|---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| --------- | ------ | ----- | ----- | ----- | ----- | ----- | ------- |
+| 1.        |        |       |       |       |       |       |         |
+| 2.        |        |       |       |       |       |       |         |
+| 3.        |        |       |       |       |       |       |         |
+| 4.        |        |       |       |       |       |       |         |
+| 5.        |        |       |       |       |       |       |         |
 
 **Did it help, and how do I know:**
 
 <!-- If it made things worse, say that. Honestly reported, that earns full
      credit and is more interesting than one that worked. -->
-
-
 
 ---
 
@@ -297,8 +291,6 @@ full. -->
 <!-- For each criterion still missed: what you'd do, and why you stopped where
      you did. "I ran out of time" is fine if it's true. Pretending nothing is
      left is not. -->
-
-
 
 <!-- ═════════════════════════════════════════════════════════════════════
 

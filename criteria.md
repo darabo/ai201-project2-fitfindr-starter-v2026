@@ -24,10 +24,16 @@ data earns credit; *"80% seemed reasonable"* does not.
 Given a query that matches at least one listing, the agent completes all three
 tool calls and returns a fit card — in at least 4 of 5 tries.
 
+**How to check:** run `python app.py ask 'vintage graphic tee under $30'`
+five times with caching off (`AI201_CACHE=0`). A try passes if it prints a
+`Found:` line and a non-empty `Fit card:` line, with no stack trace.
+
 **Why this target:**
-<!-- Why 4 of 5 and not 5 of 5? Something about your search, probably —
-     "my search is a plain keyword match and some phrasings will miss" is a
-     real answer. -->
+The search half is deterministic. `search_listings` is a plain keyword match
+over the listings file, and this query returns ten listings under $30. The
+rest of the run makes two model calls, though, and `run_agent` doesn't handle
+`ModelUnavailable` yet (that comes in unit 4). One rate-limit or network error
+means no fit card. I'm allowing one miss in five for that, not for the search.
 
 ---
 
@@ -36,68 +42,87 @@ tool calls and returns a fit card — in at least 4 of 5 tries.
 Given a query that matches no listings, the agent stops before calling
 `suggest_outfit` and returns a message naming what to change — 5 of 5 tries.
 
+**How to check:** run `python app.py ask 'designer ballgown size XXS under $5'`
+five times. A try passes if the output says it found no listings and names at
+least one concrete change (raise the max price, drop the size, or use broader
+words), `session["fit_card"]` is `None`, and the run reports
+`0 model calls this session`.
+
 **Why this target:**
-<!-- Why is 5 of 5 reasonable here when criterion 1 isn't? What's different
-     about this path? -->
+Nothing on this path is random. Parsing is regex, the search is a filter, and
+the branch in `agent.py::run_agent` returns before any model call. The message
+comes from a template in `_no_results_message`. If it fails even once, the
+branch is broken, so anything below 5 of 5 would excuse a real bug.
 
 ---
 
 ## 3. Something about state
 
-<!-- YOU WRITE THIS ONE.
+For five different matching queries (`vintage graphic tee under $30`,
+`denim jacket`, `y2k top size S`, `chunky sneakers under $60`,
+`leather bag`), call `run_agent(query, get_example_wardrobe())` once each.
+A try passes when the three values below are the same listing `id`:
 
-     How would you know that the item your search found is the same item the
-     next tool received? Name something countable or observable.
+- `session["search_results"][0]["id"]`
+- `session["selected_item"]["id"]`
+- `session["tool_inputs"]["suggest_outfit"]` and `session["tool_inputs"]["create_fit_card"]`
 
-     This is the criterion people find hardest, because state failure doesn't
-     look like state failure — it looks like a tool problem. Something that
-     compares session["selected_item"] against what actually reached
-     suggest_outfit is the shape you're after. -->
-
-
+The target is 5 of 5 queries.
 
 **Why this target:**
-
-
-
+`run_agent` puts every result into the session and passes the next tool's
+inputs back out of it, and `tool_inputs` records which item id each model tool
+actually got. None of that involves the model, so the ids either line up every
+time or the state handling is wrong. I used five different queries rather than
+one query five times. The same query would land on the same item every time,
+so it couldn't catch the wrong item being carried forward.
 ---
 
 ## 4. Something about the fit card
 
-<!-- YOU WRITE THIS ONE.
+Run `python app.py ask 'vintage graphic tee under $30'` five times with
+caching off. A fit card passes if it meets all four of these:
 
-     The fit card calls a model, so the same input can produce different words
-     each time. That's not a bug — it's the nature of the tool. So what would
-     make it acceptable?
+1. It contains the selected item's price as `$<price>` (for example `$19` or
+   `$19.00`).
+2. It contains the platform name, ignoring case (for example `depop`).
+3. It is 70 words or fewer, counting hashtags.
+4. It doesn't present the item as being for sale by the poster. The words
+   "selling" and "listing these" don't appear.
 
-     Think about what you'd actually be unhappy to see. A caption that never
-     mentions the price? Two different items producing the same opening
-     sentence? A card longer than a caption anyone would post? Any of those can
-     be turned into a number. -->
-
-
+The target is at least 4 of 5 fit cards.
 
 **Why this target:**
-
-
-
+`create_fit_card` runs at `TEMPERATURE = 0.9`. The prompt asks for the price
+and platform once each, but the model decides how to write them. I've already
+seen `$38` in one card and `$38.00` in another. One card for the Levi's said
+"catch me listing these over on depop soon", which reads like the poster is
+selling the jeans, and that's what check 4 is for. Because the wording is
+random, 5 of 5 would be a target I can't control. Letting more than one card
+in five miss would mean the caption tool can't be trusted.
 ---
 
-## 5. Your choice
+## 5. The empty wardrobe doesn't invent a closet
 
-<!-- YOU WRITE THIS ONE TOO.
+Run `python app.py ask --empty-wardrobe 'denim jacket under $50'` five
+times with caching off. A try passes when all three of these hold:
 
-     Pick something you actually care about getting right. Speed, the empty
-     wardrobe path, what happens when the model can't be reached, whether the
-     search respects a price ceiling — anything, as long as it names a number
-     or an observable outcome. -->
+1. A fit card comes back.
+2. The `Outfit:` text doesn't claim the user already owns anything. None of
+   these phrases appear, ignoring case: "you own", "you already", "your
+   wardrobe", "your closet", "from your".
+3. The item in `Found:` costs $50 or less.
 
-
+The target is at least 4 of 5 tries.
 
 **Why this target:**
-
-
-
+With an empty wardrobe, `suggest_outfit` switches to a prompt that says the
+user "haven't told you what else they own". When I tested it on the Levi's
+501s, the model still ended with "Both looks use pieces you probably already
+own." So this slip really happens, and it's a model wording problem, not a
+code bug. That's why I'm allowing one miss and not targeting 5 of 5. The price
+part is deterministic. If an item over $50 shows up even once, the parser or
+the filter is broken.
 ---
 
 <!-- ─────────────────────────────────────────────────────────────────────────
