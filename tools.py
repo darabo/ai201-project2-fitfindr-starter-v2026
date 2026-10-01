@@ -20,18 +20,14 @@ That last line is what your loop branches on. "Returns a list" earns nothing —
 the description has to say what is *in* the list.
 """
 
+import re
+
 import config  # noqa: F401 — you'll use this in search_listings
 from generate import generate
 from utils.data_loader import load_listings
 
 
 # ── Tool 1: search_listings ───────────────────────────────────────────────────
-
-def search_listings(
-    description: str,
-    size: str | None = None,
-    max_price: float | None = None,
-) -> list[dict]:
 
 _STOPWORDS = {
     "a", "an", "and", "the", "for", "with", "under", "over", "in", "of"
@@ -44,7 +40,7 @@ def _keywords(text: str) -> set[str]:
 
 def _size_tokens(size: str) -> set[str]:
     cleaned = re.sub(r"\([^)]*\)", " ", size or "") # drop parentheticals
-    parts = [p.strip().upper for p in cleaned.split("/")]
+    parts = [p.strip().upper() for p in cleaned.split("/")]
     return {p for p in parts if p}
 
 def _size_matches(wanted: str, listing_size: str) -> bool:
@@ -54,6 +50,13 @@ def _size_matches(wanted: str, listing_size: str) -> bool:
     if any(token.startswith("ONE SIZE") for token in listing_tokens):
         return True
     return bool(_size_tokens(wanted) & listing_tokens)
+
+
+def search_listings(
+    description: str,
+    size: str | None = None,
+    max_price: float | None = None,
+) -> list[dict]:
     """
     Search the listings data for items matching a description, and optionally a
     size and a price ceiling.
