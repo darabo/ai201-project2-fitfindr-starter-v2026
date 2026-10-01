@@ -162,6 +162,21 @@ Can't write a fit card without an outfit suggestion — suggest_outfit returned 
 - _What came back:_ Working tools and a regex-based `parse_query`. When it got to the state criterion, it pointed out that the session only held `selected_item`, so nothing recorded what actually reached `suggest_outfit`. That made the criterion untestable. It added `session["tool_inputs"]` to record the item id each model tool receives. Its first draft of criterion 1 also said the query matched six listings; when we ran it, it matched ten.
 - _What I changed:_ <!-- TODO (Dara): what you checked, reworded, or decided differently -->
 
+## Stretch Features
+
+<!-- Declared here, and committed, before any of it was built. -->
+
+**Declared: a second branch — a query too vague to search.**
+
+- **Condition:** after parsing, the description has no searchable keywords left. For example, `under $30` or `something in size M` only gives a price or a size.
+- **Path taken:** the loop stops *before* `search_listings` is called. It puts a message in `session["error"]` asking what kind of item the user wants, and keeps whatever price or size it did understand. No tool runs and no model call is made.
+- **Why it's a separate branch from the empty search:** the empty-search branch runs the search and then stops because nothing matched. This one never searches, because there's nothing to search for. Without it, `search_listings('')` returns `[]`, and the user gets told to "use broader words" for a query that had no words in it.
+- **What it changes:** `agent.py::run_agent` gets a second `if`, between parsing and searching. The session gets a `steps` list so a run log shows which steps ran.
+
+*Status: declared, not built yet.*
+
+---
+
 <!-- ═══════════════════════ UNIT 4 — THE TEST ═══════════════════════
 
      Don't fill these in during unit 3.
