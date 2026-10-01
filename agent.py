@@ -17,7 +17,7 @@ import re
 
 import config
 import trace
-from tools import search_listings, suggest_outfit, create_fit_card
+from tools import search_listings, suggest_outfit, create_fit_card, _keywords
 from generate import ModelUnavailable
 
 
@@ -47,6 +47,7 @@ def new_session(query: str, wardrobe: dict) -> dict:
         "fit_card": None,            # what create_fit_card returned
         "error": None,               # set when the run ended early
         "tool_inputs": {},           # item id each model tool actually received
+        "steps": [],                 # which steps ran, in order — the run log
     }
 
 
@@ -54,7 +55,11 @@ def new_session(query: str, wardrobe: dict) -> dict:
 
 _PRICE_RE = re.compile(r"(?:under|below|less than|max|up to)?\s*\$\s*(\d+(?:\.\d+)?)", re.I)
 _SIZE_RE = re.compile(r"\bsize\s+([A-Za-z0-9./]+)", re.I)
-_FILLER_RE = re.compile(r"\b(i'?m|i am|looking for|looking|want|need|find me|show me|please)\b", re.I)
+_FILLER_RE = re.compile(
+    r"\b(i'?m|i am|looking for|looking|want|need|find me|show me|please"
+    r"|something|anything|stuff|things?|items?|cheap|nice|some|any)\b",
+    re.I,
+)
 
 
 def parse_query(query: str) -> dict:
@@ -95,6 +100,21 @@ def _no_results_message(parsed: dict) -> str:
         + (f" in size {parsed['size']}" if parsed["size"] else "")
         + (f" under ${parsed['max_price']:g}" if parsed["max_price"] is not None else "")
         + ". Try to " + ", or ".join(tips) + "."
+    )
+
+
+def _too_vague_message(parsed: dict) -> str:
+    """Second branch: say what was understood and ask for the missing piece."""
+    understood = []
+    if parsed["size"]:
+        understood.append(f"size {parsed['size']}")
+    if parsed["max_price"] is not None:
+        understood.append(f"under ${parsed['max_price']:g}")
+    got = f"I got {' and '.join(understood)}, but" if understood else "I"
+    return (
+        f"{got} couldn't tell what kind of item you want. Add a word or two "
+        "about the item itself — e.g. 'graphic tee', 'denim jacket', or "
+        "'leather bag' — and I'll search again."
     )
 
 
@@ -163,16 +183,25 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     count += 1
     trace.check_iterations(count)
     session["parsed"] = parse_query(session["query"])
+    session["steps"].append("parse_query")
+
+    # BRANCH 2 (stretch): nothing left to search for → ask, don't search.
+    if not _keywords(session["parsed"]["description"]):
+        session["error"] = _too_vague_message(session["parsed"])
+        session["steps"].append("stop: query too vague")
+        return session
 
     # Step 2 — search.
     count += 1
     trace.check_iterations(count)
     session["search_results"] = search_listings(**session["parsed"])
+    session["steps"].append("search_listings")
 
     # THE BRANCH: nothing found → explain what to change and stop here.
     # suggest_outfit is never called with nothing.
     if not session["search_results"]:
         session["error"] = _no_results_message(session["parsed"])
+        session["steps"].append("stop: no listings matched")
         return session
 
     # Otherwise take the best match.
@@ -185,6 +214,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     session["outfit_suggestion"] = suggest_outfit(
         session["selected_item"], session["wardrobe"]
     )
+    session["steps"].append("suggest_outfit")
 
     # Step 4 — fit card, read back out of the session.
     count += 1
@@ -193,6 +223,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     session["fit_card"] = create_fit_card(
         session["outfit_suggestion"], session["selected_item"]
     )
+    session["steps"].append("create_fit_card")
 
     return session
 
