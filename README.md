@@ -150,7 +150,6 @@ Can't write a fit card without an outfit suggestion — suggest_outfit returned 
 
 ## How I Used AI
 
-
 **Moment 1**
 
 - _What I asked for:_ I'd written helper functions for `search_listings` (`_keywords`, `_size_tokens`, `_size_matches`) and asked Claude to help fix the bugs in `tools.py`, which wouldn't import.
@@ -159,9 +158,9 @@ Can't write a fit card without an outfit suggestion — suggest_outfit returned 
 
 **Moment 2**
 
-- _What I asked for:_ I asked Claude on guidance for the three tools and the planning loop from my Tool Inventory spec, and then to draft criteria 3–5.
+- _What I asked for:_ I asked Claude for guidance for the three tools and the planning loop from my Tool Inventory spec, and then to draft criteria 3–5.
 - _What came back:_ Working tools and a regex-based `parse_query`. When it got to the state criterion, it pointed out that the session only held `selected_item`, so nothing recorded what actually reached `suggest_outfit`. That made the criterion untestable. It added `session["tool_inputs"]` to record the item id each model tool receives. Its first draft of criterion 1 also said the query matched six listings; when we ran it, it matched ten.
-- _What I changed:_ Reworded tools wording and criteria to be more specific and checkable, and ensured the tests would actually catch what they claimed to.
+- _What I changed:_ Reworded tools wording and criteria to be more specific and checkable, and ensured the tests would actually catch what they claimed to. Testing caught "something in size M" taking the wrong branch.
 
 ## Stretch Features
 
