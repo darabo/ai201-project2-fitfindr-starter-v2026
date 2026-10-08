@@ -299,7 +299,7 @@ $ python app.py ask 'designer ballgown size XXS under $5' --trace
 - **How it's measured:** the same way as the first. `python run_eval.py --label after2`, a third run log in the same table format, and a statement of whether it helped and how I know.
 - **One change at a time:** the second change starts from the agent as it stands after the first improvement, so each run log differs from the one before it by exactly one change.
 
-_Status: declared, not built._
+_Status: built and measured._ Declared in `b323fb0` and built in `7e8d53a`. It's a rewrite of `create_fit_card`'s prompt so the poster is the buyer, following the for-sale pattern in the diagnosis. The third run log and whether it helped are under **The Improvement → Second improvement**.
 
 **Not attempted: a second tool on MCP.** The two tools left both call the model. Over MCP, a bad key would reach the agent as an `MCPError` instead of a `ModelUnavailable`, and my handler for it would stop working. Every call also starts a fresh server process, so the rate limiter and call counter would reset on each call. That's a lot of risk for one point.
 
@@ -596,6 +596,66 @@ Two cautions about reading too much into this:
 Criteria 1–3 didn't move. Those parts are deterministic and this change doesn't reach them.
 
 One thing the revision made visible: in the spot check, two outfits opened with "Since I don't know your wardrobe" and "Since I don't know your current closet". The *original* criterion 5 check bans "your wardrobe" and "your closet", so it would have counted a correct answer as a failure. If I hadn't revised it, this fix could have looked like it made things worse. (No after-run outfit happened to use that phrasing, which is why the original check also shows 5/5 here.)
+
+### Second improvement (stretch)
+
+**What I changed:** one prompt, in `tools.py::create_fit_card` (commit `7e8d53a`), starting from the agent as it was after improvement 1. I added one sentence saying who owns the item, and labelled the price and platform as the buyer's:
+
+> The person posting just bought it on {platform} and is showing off what they found and how they'd wear it. It's theirs now. They are the buyer, not the seller.
+>
+> Price they paid: … / Platform they bought it on: …
+
+The rules, the system prompt, and `suggest_outfit` (including improvement 1) are unchanged.
+
+**Which failure it was meant to fix:** the for-sale pattern from the diagnosis. In the before run, 7 of 40 fit cards presented the item as the poster's to sell ("I just dropped on depop", "I just listed on Poshmark", "Grab it before I change my mind and keep it for myself"), and one of them was criterion 4's try 2 FAIL. The prompt gave a price and a platform and said "sound like a real person posting", but never said the poster was the buyer.
+
+### Run Log — After 2
+
+`python run_eval.py --label after2`: the same 9 scenarios, 5 tries each, caching off, 80 model calls, no crashes, no model errors. Raw output is in `results/run_2026-10-07_2213_after2.md`, and the cells come from `check_criteria.py` (`results/run_2026-10-07_2213_after2_checked.md`).
+
+| Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
+| --------- | ------ | ----- | ----- | ----- | ----- | ----- | ------- |
+| 1. A matching query completes all three tools | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. An impossible query stops before the second tool | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. The searched item is the item each tool receives | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 4. Fit card has price, platform, ≤70 words, not selling (revised) | 4 of 5 | PASS | PASS | FAIL | PASS | PASS | MET (4/5) |
+| 5. The empty wardrobe doesn't invent a closet (revised) | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+
+Criterion 4 try 3 failed check 1, the price, not the for-sale check. The original check gives the same 4/5:
+
+```
+scored this faded grey vintage band tee on depop for just nineteen bucks and honestly it's the grunge staple my closet needed. planning to live in it with baggy jeans and chunky sneakers all weekend. 🎸🖤
+
+#thrifted #depopfinds
+```
+
+**All three runs side by side:**
+
+| Criterion | Target | Before | After (improvement 1) | After 2 (improvement 2) |
+| --------- | ------ | ------ | --------------------- | ----------------------- |
+| 1. A matching query completes all three tools | 4 of 5 | MET (5/5) | MET (5/5) | MET (5/5) |
+| 2. An impossible query stops before the second tool | 5 of 5 | MET (5/5) | MET (5/5) | MET (5/5) |
+| 3. The searched item is the item each tool receives | 5 of 5 | MET (5/5) | MET (5/5) | MET (5/5) |
+| 4. Fit card … not selling (revised) | 4 of 5 | MET (4/5) | MET (5/5) | MET (4/5) |
+| 5. The empty wardrobe doesn't invent a closet (revised) | 4 of 5 | MISSED (2/5) | MET (5/5) | MET (5/5) |
+
+**Every fit card in each run (40 per run), not scored:**
+
+| | Before | After | After 2 |
+| --- | --- | --- | --- |
+| Reads as the poster selling it (checker) | 7 | 2 | 1 |
+| Reads as the poster selling it (my reading) | 7 | 2 | **0** |
+| Price not written as `$N` | 0 | 0 | 1 |
+| Opens with "Score…" (scored, score, scoreee…) | 9 | 13 | **39** |
+| "obsessed" in the first sentence | 24 | 26 | **38** |
+
+**Did it help, and how do I know:** For the failure it targeted, yes, but it cost something, and criterion 4's own number went *down*.
+
+- **The for-sale pattern is gone in this run.** By my reading, 0 of 40 cards present the item as the poster's to sell, against 9 of 80 across the two earlier runs. The checker flags 1, but it's a false positive: "Score one for my **Poshmark cart** because this cropped Wrangler denim jacket is finally mine" is a buyer talking, and the revised check's `"my poshmark"` pattern can't tell a cart from a shop. Every card is now written as the buyer ("Scored this… on Depop for just $19"). With a baseline that already swung from 7/40 to 2/40 on its own, 0/40 is strong evidence but not proof.
+- **Criterion 4 went from 5/5 to 4/5, and it's a different check that failed.** Try 3 wrote the price as "nineteen bucks". That's the first time in 120 fit cards across the three runs that a card spelled the price out. One case can't tell me whether the new prompt caused it, since "Price they paid: $19.00" is still a number in the prompt. Criterion 4 still meets its target, but the margin is gone again.
+- **It made the captions nearly identical.** 39 of 40 cards now open with "Score…" (32 "Scored this…"), and 38 of 40 have "obsessed" in the first sentence. Before, openings varied: "Still…" 16 times, "Found…" 7, "Scored…" 6. The new sentence, "just bought it… showing off what they found", gives the model one obvious opening move, and at temperature 0.9 it takes that move almost every time. It's the same lesson as improvement 1's copied example pieces: whatever concrete framing the prompt hands the model, the model leans on hard. No criterion measures variety, so no verdict shows it.
+
+Overall it fixed what it targeted, at the cost of variety I care about, and with one new price failure I can't explain yet.
 
 ---
 
