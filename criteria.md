@@ -100,6 +100,21 @@ seen `$38` in one card and `$38.00` in another. One card for the Levi's said
 selling the jeans, and that's what check 4 is for. Because the wording is
 random, 5 of 5 would be a target I can't control. Letting more than one card
 in five miss would mean the caption tool can't be trusted.
+
+> **Revised in unit 4:** Check 4 becomes: it doesn't present the item as being
+> for sale by the poster. None of these appear, ignoring case: "selling",
+> "listing", "listed", "dropped on", "my depop", "my poshmark", "my thredup",
+> "before I change my mind". Checks 1–3 and the target (at least 4 of 5) are
+> unchanged.
+>
+> **Why revised:** check 4 measured two phrasings, not the thing it was for.
+> In the before run, 7 of 40 fit cards presented the item as the poster's to
+> sell and still passed: "I just dropped on depop for $19", "I just listed on
+> Poshmark", "It's listed over on my Poshmark", "Grab it before I change my
+> mind and keep it for myself". Each of those is what check 4 was written to
+> catch ("reads like the poster is selling"), and none of them uses the words
+> "selling" or "listing these". The new list is made of the phrasings that
+> actually showed up. The revision makes the check stricter, not looser.
 ---
 
 ## 5. The empty wardrobe doesn't invent a closet
@@ -123,6 +138,23 @@ own." So this slip really happens, and it's a model wording problem, not a
 code bug. That's why I'm allowing one miss and not targeting 5 of 5. The price
 part is deterministic. If an item over $50 shows up even once, the parser or
 the filter is broken.
+
+> **Revised in unit 4:** Check 2 becomes: the `Outfit:` text doesn't claim or
+> assume the user already owns anything. None of these phrases appear,
+> ignoring case: "already own", "already have", "you own", "in your closet",
+> "in your wardrobe", "from your closet", "from your wardrobe". Checks 1 and 3
+> and the target (at least 4 of 5) are unchanged.
+>
+> **Why revised:** the phrase list missed the exact slip this criterion was
+> written for. The reason above quotes it: "pieces you probably already own".
+> The banned phrase was "you already", and the model puts a word in between
+> ("you probably already own", "you likely already own"), so 3 of the 5
+> before-run outfits made that claim and still passed. The list also failed
+> the other way. In a smoke run, "Since I don't know your closet yet" matched
+> "your closet" and failed a try that claimed nothing. The new list catches
+> "already own/have" whatever comes before it, and only flags "closet" and
+> "wardrobe" when they're used to mean the user's existing clothes ("in your…",
+> "from your…").
 ---
 
 <!-- ─────────────────────────────────────────────────────────────────────────

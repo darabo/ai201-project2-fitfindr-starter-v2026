@@ -29,9 +29,23 @@ CRITERIA = {
     4: ("Fit card has price, platform, ≤70 words, not selling", 4),
     5: ("The empty wardrobe doesn't invent a closet", 4),
 }
+# Criteria with a unit 4 revision in criteria.md. The revised check is the one
+# scored; the original is still reported underneath so both can be compared.
+REVISED = {4, 5}
 
-# Criterion 5, check 2.
+# Criterion 4, check 4: original, then "Revised in unit 4".
+SALE_PATTERNS = [r"\bselling\b", r"listing these"]
+SALE_PATTERNS_REVISED = [
+    r"\bselling\b", r"\blisting\b", r"\blisted\b", r"dropped on",
+    r"my depop", r"my poshmark", r"my thredup", r"before i change my mind",
+]
+
+# Criterion 5, check 2: original, then "Revised in unit 4".
 OWNERSHIP_PHRASES = ["you own", "you already", "your wardrobe", "your closet", "from your"]
+OWNERSHIP_PHRASES_REVISED = [
+    "already own", "already have", "you own", "in your closet",
+    "in your wardrobe", "from your closet", "from your wardrobe",
+]
 # Criterion 5, check 3.
 CRITERION_5_MAX_PRICE = 50.0
 
@@ -114,8 +128,8 @@ def _word_count(text):
     return sum(1 for token in text.split() if re.search(r"\w", token))
 
 
-def check_4(record):
-    """Fit card: $price, platform, ≤70 words, no "selling"/"listing these"."""
+def check_4(record, revised=True):
+    """Fit card: $price, platform, ≤70 words, not presented as for sale."""
     problems = _common(record)
     if problems:
         return problems
@@ -131,15 +145,22 @@ def check_4(record):
     words = _word_count(card)
     if words > 70:
         problems.append(f"{words} words, over 70")
-    lower = card.lower()
-    if re.search(r"\bselling\b", lower):
-        problems.append('says "selling"')
-    if "listing these" in lower:
-        problems.append('says "listing these"')
+    for pattern in (SALE_PATTERNS_REVISED if revised else SALE_PATTERNS):
+        match = re.search(pattern, card, re.I)
+        if match:
+            problems.append(f'reads as for sale: "{_sentence_around(card, match.start())}"')
     return problems
 
 
-def check_5(record):
+def _sentence_around(text, at):
+    """The sentence containing position `at`, for quoting in a FAIL reason."""
+    start = max(text.rfind(c, 0, at) for c in ".!?\n") + 1
+    ends = [i for i in (text.find(c, at) for c in ".!?\n") if i != -1]
+    end = min(ends) + 1 if ends else len(text)
+    return " ".join(text[start:end].split())
+
+
+def check_5(record, revised=True):
     """Fit card back, outfit claims nothing owned, item ≤ $50."""
     problems = _common(record)
     if problems:
@@ -147,12 +168,11 @@ def check_5(record):
     s = record["session"]
     if not (s.get("fit_card") or "").strip():
         problems.append("no fit card" + (f" (stopped early: {s['error']})" if s.get("error") else ""))
-    outfit = (s.get("outfit_suggestion") or "").lower()
-    for phrase in OWNERSHIP_PHRASES:
-        at = outfit.find(phrase)
+    outfit = s.get("outfit_suggestion") or ""
+    for phrase in (OWNERSHIP_PHRASES_REVISED if revised else OWNERSHIP_PHRASES):
+        at = outfit.lower().find(phrase)
         if at != -1:
-            context = (s.get("outfit_suggestion") or "")[max(0, at - 30): at + len(phrase) + 30]
-            problems.append(f'outfit says "{phrase}": …{" ".join(context.split())}…')
+            problems.append(f'outfit says "{phrase}": "{_sentence_around(outfit, at)}"')
     price = (s.get("selected_item") or {}).get("price")
     if price is None:
         problems.append("no selected item")
@@ -201,19 +221,19 @@ def report(run):
         "| --------- | ------ | ----- | ----- | ----- | ----- | ----- | ------- |",
     ]
     details = []
+    original_rows = []
     for number, (name, target) in CRITERIA.items():
         scored, extra = five_tries(run, number)
         results = [(label, CHECKS[number](record)) for label, record in scored]
-        cells = ["PASS" if not problems else "FAIL" for _, problems in results]
-        passes = cells.count("PASS")
-        if len(cells) < 5:
-            verdict = f"INCOMPLETE ({len(cells)} tries)"
-        else:
-            verdict = f"{'MET' if passes >= target else 'MISSED'} ({passes}/5)"
-        cells += ["—"] * (5 - len(cells))
-        out.append(f"| {number}. {name} | {target} of 5 | {' | '.join(cells[:5])} | {verdict} |")
+        row_name = f"{name} (revised)" if number in REVISED else name
+        out.append(_table_row(number, row_name, target, results))
+        if number in REVISED:
+            as_written = [(label, CHECKS[number](record, revised=False))
+                          for label, record in scored]
+            original_rows.append(_table_row(number, f"{name} (as originally written)",
+                                            target, as_written))
 
-        details.append(f"### {number}. {name}")
+        details.append(f"### {number}. {row_name}")
         details.append("")
         for label, problems in results:
             status = "PASS" if not problems else "FAIL — " + "; ".join(problems)
@@ -229,7 +249,56 @@ def report(run):
                 details.append(f"  - {label}: FAIL — " + "; ".join(problems))
         details.append("")
 
-    return "\n".join(out + ["", "## Why each try passed or failed", ""] + details)
+    if original_rows:
+        out += [
+            "",
+            "The revised rows are scored with the checks under **Revised in unit 4**",
+            "in `criteria.md`. The same tries, scored with the original checks:",
+            "",
+            "| Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |",
+            "| --------- | ------ | ----- | ----- | ----- | ----- | ----- | ------- |",
+            *original_rows,
+        ]
+
+    return "\n".join(out + _whole_run_sale_check(run)
+                     + ["", "## Why each try passed or failed", ""] + details)
+
+
+def _table_row(number, name, target, results):
+    cells = ["PASS" if not problems else "FAIL" for _, problems in results]
+    passes = cells.count("PASS")
+    if len(cells) < 5:
+        verdict = f"INCOMPLETE ({len(cells)} tries)"
+    else:
+        verdict = f"{'MET' if passes >= target else 'MISSED'} ({passes}/5)"
+    cells += ["—"] * (5 - len(cells))
+    return f"| {number}. {name} | {target} of 5 | {' | '.join(cells[:5])} | {verdict} |"
+
+
+def _whole_run_sale_check(run):
+    """
+    The revised criterion 4 check 4 ("not presented as for sale") applied to
+    every fit card in the run, not just criterion 4's five. Not scored. It's
+    the pattern the diagnosis looks at.
+    """
+    cards, flagged = 0, []
+    for sc in run["scenarios"]:
+        for i, t in enumerate(sc["tries"], 1):
+            card = ((t.get("session") or {}).get("fit_card") or "").strip()
+            if not card:
+                continue
+            cards += 1
+            hits = [_sentence_around(card, m.start())
+                    for p in SALE_PATTERNS_REVISED for m in [re.search(p, card, re.I)] if m]
+            if hits:
+                flagged.append(f"- {sc['name']}, try {i}: " + " / ".join(f'"{h}"' for h in dict.fromkeys(hits)))
+    return [
+        "",
+        f"**Every fit card in the run, revised check 4:** {len(flagged)} of {cards} "
+        "read as the poster selling the item (not scored, for the diagnosis).",
+        "",
+        *flagged,
+    ]
 
 
 def main():
