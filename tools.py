@@ -176,9 +176,12 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
     if not items:
         prompt = (
             f"Someone is thinking about buying this thrifted item:\n{item_line}\n\n"
-            "They haven't told you what else they own. Suggest two outfits "
-            "built around this item using common basics (say what kind of "
-            "bottoms, shoes, and layers). Keep it under 120 words, plain text."
+            "You don't know what else they own, so don't guess. Suggest two "
+            "outfits built around this item, naming each other piece by type "
+            "and color (e.g. black straight-leg jeans, white low-top sneakers) "
+            "as something that would pair well with it. Don't say or suggest "
+            "that they already own or probably have any of those pieces. "
+            "Keep it under 120 words, plain text."
         )
     else:
         closet = "\n".join(
