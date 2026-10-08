@@ -105,7 +105,7 @@ def cmd_examples(args):
 
 
 def _ask_one(query, wardrobe, use_trace):
-    from agent import run_agent
+    from agent import run_agent, dropped_notice
     import trace as trace_module
 
     if use_trace:
@@ -114,6 +114,10 @@ def _ask_one(query, wardrobe, use_trace):
     session = run_agent(query, wardrobe)
 
     print()
+    notice = dropped_notice(session)
+    if notice and not session["error"]:
+        print(f"  {notice}")
+        print()
     if session["error"]:
         print(f"  {session['error']}")
     else:

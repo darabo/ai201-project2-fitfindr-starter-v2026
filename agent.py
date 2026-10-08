@@ -48,6 +48,7 @@ def new_session(query: str, wardrobe: dict) -> dict:
         "fit_card": None,            # what create_fit_card returned
         "error": None,               # set when the run ended early
         "tool_inputs": {},           # item id each model tool actually received
+        "dropped": [],               # constraints the retry loosened, e.g. ["size"]
         "steps": [],                 # which steps ran, in order — the run log
     }
 
@@ -88,20 +89,35 @@ def parse_query(query: str) -> dict:
     return {"description": description, "size": size, "max_price": max_price}
 
 
-def _no_results_message(parsed: dict) -> str:
-    """Say what the user could change, not just "no results"."""
+def _no_results_message(parsed: dict, dropped: list | None = None) -> str:
+    """
+    Say what the user could change, not just "no results". If the retry
+    already dropped the size, say so instead of suggesting it again.
+    """
+    size_dropped = "size" in (dropped or [])
     tips = []
     if parsed["max_price"] is not None:
         tips.append(f"raise your max price above ${parsed['max_price']:g}")
-    if parsed["size"]:
+    if parsed["size"] and not size_dropped:
         tips.append(f"drop the size {parsed['size']} filter")
     tips.append("use broader words (e.g. 'jacket' or 'tee' instead of a specific style)")
     return (
         f"No listings matched '{parsed['description']}'"
-        + (f" in size {parsed['size']}" if parsed["size"] else "")
+        + (f" in size {parsed['size']}" if parsed["size"] and not size_dropped else "")
         + (f" under ${parsed['max_price']:g}" if parsed["max_price"] is not None else "")
+        + (f", even without the size {parsed['size']} filter" if size_dropped else "")
         + ". Try to " + ", or ".join(tips) + "."
     )
+
+
+def dropped_notice(session: dict) -> str | None:
+    """What the retry loosened, for the user to see above the result."""
+    if "size" in session["dropped"]:
+        return (
+            f"Nothing in size {session['parsed']['size']}, so I searched "
+            "without the size filter."
+        )
+    return None
 
 
 def _too_vague_message(parsed: dict) -> str:
@@ -209,10 +225,24 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                returned=session["search_results"],
                note=f"{len(session['search_results'])} match(es)")
 
+    # RETRY (stretch): nothing in that size → search once more without the
+    # size. Only the size is dropped; description and price stay as asked.
+    if not session["search_results"] and session["parsed"]["size"]:
+        count += 1
+        trace.check_iterations(count)
+        retry_args = {**search_args, "size": None}
+        session["search_results"] = call_tool("search_listings", retry_args)
+        session["dropped"].append("size")
+        session["steps"].append("search_listings (retry without size)")
+        trace.step("search_listings (via MCP, retry without size)",
+                   inputs=str(retry_args), returned=session["search_results"],
+                   note=f"dropped size {session['parsed']['size']}: "
+                        f"{len(session['search_results'])} match(es)")
+
     # THE BRANCH: nothing found → explain what to change and stop here.
     # suggest_outfit is never called with nothing.
     if not session["search_results"]:
-        session["error"] = _no_results_message(session["parsed"])
+        session["error"] = _no_results_message(session["parsed"], session["dropped"])
         session["steps"].append("stop: no listings matched")
         trace.step("branch", note="search returned []: stopping before suggest_outfit")
         return session

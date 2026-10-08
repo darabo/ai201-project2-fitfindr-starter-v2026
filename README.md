@@ -231,7 +231,67 @@ The second branch stops before `search_listings`. The empty-search branch stops 
 - **What it changes:** `agent.py::run_agent` (a retry between the search and the empty-search check), `agent.py::_no_results_message` (no "drop the size" tip once the size has been dropped), and `app.py::_ask_one` (prints the dropped-constraint notice above `Found:`).
 - **When it's built:** before `run_eval.py --label before`, so the before and after run logs measure the same agent. The impossible query in criterion 2 (`designer ballgown size XXS under $5`) still matches nothing without the size filter, so it still stops with 0 model calls.
 
-_Status: declared, not built._
+_Status: built._ Declared in commit `b323fb0` and built in the commit right after it, before the "before" test run.
+
+**What it changed:**
+
+- `agent.py::run_agent`: a retry `if` between the first search and the empty-search branch. If the search came back `[]` and `parsed["size"]` is set, it calls `search_listings` through MCP again with `size=None`, adds `"size"` to `session["dropped"]`, and records the step. It only retries once. There's no loop, and the retry counts toward `trace.check_iterations`.
+- `agent.py::new_session`: a new `dropped` field, `[]` unless the retry ran.
+- `agent.py::_no_results_message`: takes `dropped`. Once the size has been dropped, the message says "even without the size … filter" and stops suggesting the user drop it.
+- `agent.py::dropped_notice` and `app.py::_ask_one`: when the retry found something, the output says which constraint was dropped, above `Found:`.
+- Queries with no size, and sized queries that already match, take exactly the same path as before (`'designer ballgown under $5'` and `'y2k top size S'` both have `dropped: []`).
+
+**Run log — the retry finds something** (size `XXS` dropped):
+
+```
+$ python app.py ask 'denim jacket size XXS' --trace
+[1] parse_query
+      in:  denim jacket size XXS
+      out: {'description': 'denim jacket', 'size': 'XXS', 'max_price': None}
+[2] search_listings (via MCP)
+      in:  {'description': 'denim jacket', 'size': 'XXS', 'max_price': None}
+      out: [] (empty)
+      →    0 match(es)
+[3] search_listings (via MCP, retry without size)
+      in:  {'description': 'denim jacket', 'size': None, 'max_price': None}
+      out: 8 items: Denim Jacket — Light Wash, Cropped, High-Waisted Denim Shorts — Cutoff, Denim Vest — Medium Wash, Studded … +5 more
+      →    dropped size XXS: 8 match(es)
+[4] select_item
+      out: Denim Jacket — Light Wash, Cropped ($42.0, poshmark)
+[5] suggest_outfit
+      in:  Denim Jacket — Light Wash, Cropped ($42.0, poshmark)
+      out: Hey friend, snag that Wrangler jacket! For an effortless streetwear vibe, throw it over your white ribbed tank…
+[6] create_fit_card
+      in:  Denim Jacket — Light Wash, Cropped ($42.0, poshmark)
+      out: Obsessed with this little cropped Wrangler jacket I just scored on Poshmark for $42. It gives off the absolute…
+
+  Nothing in size XXS, so I searched without the size filter.
+
+  Found:    Denim Jacket — Light Wash, Cropped — $42.0 on poshmark
+```
+
+**Run log — the retry finds nothing too** (criterion 2's query, still 0 model calls):
+
+```
+$ python app.py ask 'designer ballgown size XXS under $5' --trace
+[1] parse_query
+      in:  designer ballgown size XXS under $5
+      out: {'description': 'designer ballgown', 'size': 'XXS', 'max_price': 5.0}
+[2] search_listings (via MCP)
+      in:  {'description': 'designer ballgown', 'size': 'XXS', 'max_price': 5.0}
+      out: [] (empty)
+      →    0 match(es)
+[3] search_listings (via MCP, retry without size)
+      in:  {'description': 'designer ballgown', 'size': None, 'max_price': 5.0}
+      out: [] (empty)
+      →    dropped size XXS: 0 match(es)
+[4] branch
+      →    search returned []: stopping before suggest_outfit
+
+  No listings matched 'designer ballgown' under $5, even without the size XXS filter. Try to raise your max price above $5, or use broader words (e.g. 'jacket' or 'tee' instead of a specific style).
+
+0 model calls this session
+```
 
 **Declared: a second measured improvement.**
 
