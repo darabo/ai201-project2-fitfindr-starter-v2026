@@ -548,24 +548,54 @@ The handler is `agent.py::_stop_model_unavailable`, called from `except ModelUna
 
      `python run_eval.py --label after` -->
 
-**What I changed:**
+**What I changed:** one prompt, the empty-wardrobe prompt in `tools.py::suggest_outfit` (commit `b4c32e8`). Nothing else in the agent changed between the two runs: not the system prompt, not the wardrobe prompt, not `create_fit_card`, and not the loop.
 
-**Which failure it was meant to fix:**
+Before:
+
+> They haven't told you what else they own. Suggest two outfits built around this item using common basics (say what kind of bottoms, shoes, and layers).
+
+After:
+
+> You don't know what else they own, so don't guess. Suggest two outfits built around this item, naming each other piece by type and color (e.g. black straight-leg jeans, white low-top sneakers) as something that would pair well with it. Don't say or suggest that they already own or probably have any of those pieces.
+
+**Which failure it was meant to fix:** criterion 5, MISSED (2/5). The diagnosis put the miss in the model's output and traced it to this prompt. The prompt said the wardrobe was unknown, then asked for "common basics" without saying not to assume the user had them, so 3 of 5 outfits said "basics you probably already own". The new prompt removes "common basics", asks for pieces by type and color as suggestions, and says outright not to assume ownership. I didn't put the checker's phrase list in the prompt. That would be writing to the test, not fixing the cause.
 
 ### Run Log — After
 
+`python run_eval.py --label after`: the same 9 scenarios, 5 tries each, caching off, 80 model calls, no crashes. Raw output is in `results/run_2026-10-07_2201_after.md`, and the cells come from `check_criteria.py` (`results/run_2026-10-07_2201_after_checked.md`).
+
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 | --------- | ------ | ----- | ----- | ----- | ----- | ----- | ------- |
-| 1.        |        |       |       |       |       |       |         |
-| 2.        |        |       |       |       |       |       |         |
-| 3.        |        |       |       |       |       |       |         |
-| 4.        |        |       |       |       |       |       |         |
-| 5.        |        |       |       |       |       |       |         |
+| 1. A matching query completes all three tools | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. An impossible query stops before the second tool | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. The searched item is the item each tool receives | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 4. Fit card has price, platform, ≤70 words, not selling (revised) | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 5. The empty wardrobe doesn't invent a closet (revised) | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
 
-**Did it help, and how do I know:**
+Scored with the original checks, criteria 4 and 5 are also 5/5.
 
-<!-- If it made things worse, say that. Honestly reported, that earns full
-     credit and is more interesting than one that worked. -->
+**Before and after, side by side:**
+
+| Criterion | Target | Before | After |
+| --------- | ------ | ------ | ----- |
+| 1. A matching query completes all three tools | 4 of 5 | MET (5/5) | MET (5/5) |
+| 2. An impossible query stops before the second tool | 5 of 5 | MET (5/5) | MET (5/5) |
+| 3. The searched item is the item each tool receives | 5 of 5 | MET (5/5) | MET (5/5) |
+| 4. Fit card … not selling (revised) | 4 of 5 | MET (4/5) | MET (5/5) |
+| 5. The empty wardrobe doesn't invent a closet (revised) | 4 of 5 | **MISSED (2/5)** | **MET (5/5)** |
+
+**Did it help, and how do I know:** Yes, for the failure it targeted. Criterion 5 went from 2/5 to 5/5. Before, 3 of the 5 outfits claimed the user "probably/likely already own[s]" the pieces. After, none of the 5 do. I read all five after-run outfits rather than trusting the checker. None of them says or implies the user owns anything. They describe pieces as suggestions ("Here are two fresh ways to style it: … Layer the jacket over a black ribbed midi dress and finish the outfit with chunky black loafers"). They're 88–110 words, still under the 120 limit.
+
+It also had a side effect I didn't intend: the model copies the prompt's examples. 4 of the 5 after-run outfits use "black straight-leg jeans" and/or "white low-top sneakers" word for word, the two pieces I gave as examples of naming by type and color. No criterion checks for variety, so it doesn't change a verdict, but the outfits are less varied than they were before. The other two criterion 5 checks held: a fit card came back every time, for the same $42 jacket. In 4 uncached spot-check outfits just before the run, none had an ownership phrase either, so that's 0 of 9 against 3 of 5 before.
+
+Two cautions about reading too much into this:
+
+- **Five tries is a small sample.** 0 of 5 doesn't prove the slip can't happen. It shows the rate dropped from "most of the time" to "not seen in 9 tries".
+- **Criterion 4 also went from 4/5 to 5/5, and this change didn't cause that.** `create_fit_card` wasn't touched. Across the whole run, for-sale fit cards went from 7 of 40 to 2 of 40 (both in criterion 5's tries: "I just listed on Poshmark… Grab it before I change my mind"). That drop is the model varying at temperature 0.9, not this fix. The cause I diagnosed in `create_fit_card`'s prompt is still there.
+
+Criteria 1–3 didn't move. Those parts are deterministic and this change doesn't reach them.
+
+One thing the revision made visible: in the spot check, two outfits opened with "Since I don't know your wardrobe" and "Since I don't know your current closet". The *original* criterion 5 check bans "your wardrobe" and "your closet", so it would have counted a correct answer as a failure. If I hadn't revised it, this fix could have looked like it made things worse. (No after-run outfit happened to use that phrasing, which is why the original check also shows 5/5 here.)
 
 ---
 
