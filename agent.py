@@ -185,53 +185,93 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     trace.check_iterations(count)
     session["parsed"] = parse_query(session["query"])
     session["steps"].append("parse_query")
+    trace.step("parse_query", inputs=session["query"], returned=str(session["parsed"]))
 
     # BRANCH 2 (stretch): nothing left to search for → ask, don't search.
     if not _keywords(session["parsed"]["description"]):
         session["error"] = _too_vague_message(session["parsed"])
         session["steps"].append("stop: query too vague")
+        trace.step("branch", note="no searchable keywords: stopping before search_listings")
         return session
 
     # Step 2 — search, through the MCP server (mcp_server.py) rather than a
     # direct call. was: search_listings(**session["parsed"])
     count += 1
     trace.check_iterations(count)
-    session["search_results"] = call_tool("search_listings", {
+    search_args = {
         "description": session["parsed"]["description"],
         "size": session["parsed"]["size"],
         "max_price": session["parsed"]["max_price"],
-    })
+    }
+    session["search_results"] = call_tool("search_listings", search_args)
     session["steps"].append("search_listings")
+    trace.step("search_listings (via MCP)", inputs=str(search_args),
+               returned=session["search_results"],
+               note=f"{len(session['search_results'])} match(es)")
 
     # THE BRANCH: nothing found → explain what to change and stop here.
     # suggest_outfit is never called with nothing.
     if not session["search_results"]:
         session["error"] = _no_results_message(session["parsed"])
         session["steps"].append("stop: no listings matched")
+        trace.step("branch", note="search returned []: stopping before suggest_outfit")
         return session
 
     # Otherwise take the best match.
     session["selected_item"] = session["search_results"][0]
+    trace.step("select_item", returned=session["selected_item"])
 
     # Step 3 — outfit, read back out of the session.
     count += 1
     trace.check_iterations(count)
     session["tool_inputs"]["suggest_outfit"] = session["selected_item"]["id"]
-    session["outfit_suggestion"] = suggest_outfit(
-        session["selected_item"], session["wardrobe"]
-    )
+    try:
+        session["outfit_suggestion"] = suggest_outfit(
+            session["selected_item"], session["wardrobe"]
+        )
+    except ModelUnavailable as exc:
+        return _stop_model_unavailable(session, "suggest_outfit", exc)
     session["steps"].append("suggest_outfit")
+    trace.step("suggest_outfit", inputs=session["selected_item"],
+               returned=session["outfit_suggestion"])
 
     # Step 4 — fit card, read back out of the session.
     count += 1
     trace.check_iterations(count)
     session["tool_inputs"]["create_fit_card"] = session["selected_item"]["id"]
-    session["fit_card"] = create_fit_card(
-        session["outfit_suggestion"], session["selected_item"]
-    )
+    try:
+        session["fit_card"] = create_fit_card(
+            session["outfit_suggestion"], session["selected_item"]
+        )
+    except ModelUnavailable as exc:
+        return _stop_model_unavailable(session, "create_fit_card", exc)
     session["steps"].append("create_fit_card")
+    trace.step("create_fit_card", inputs=session["selected_item"],
+               returned=session["fit_card"])
 
     return session
+
+
+def _stop_model_unavailable(session: dict, tool: str, exc: ModelUnavailable) -> dict:
+    """
+    The model couldn't be reached mid-run. Keep what the search found, say what
+    broke and what to try, and end the run instead of showing a stack trace.
+    """
+    item = session["selected_item"]
+    session["error"] = (
+        f"Found {item['title']} (${item['price']:g} on {item['platform']}), but "
+        f"couldn't reach the model to {_MODEL_STEP_WORDS[tool]}. {exc} "
+        "Then run the same query again."
+    )
+    session["steps"].append(f"stop: model unavailable in {tool}")
+    trace.step(tool, inputs=item, note=f"ModelUnavailable: stopping. {exc}")
+    return session
+
+
+_MODEL_STEP_WORDS = {
+    "suggest_outfit": "suggest an outfit",
+    "create_fit_card": "write the fit card",
+}
 
 
 # ── running it directly ───────────────────────────────────────────────────────
