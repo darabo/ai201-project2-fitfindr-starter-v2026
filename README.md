@@ -162,6 +162,18 @@ Can't write a fit card without an outfit suggestion — suggest_outfit returned 
 - _What came back:_ Working tools and a regex-based `parse_query`. When it got to the state criterion, it pointed out that the session only held `selected_item`, so nothing recorded what actually reached `suggest_outfit`. That made the criterion untestable. It added `session["tool_inputs"]` to record the item id each model tool receives. Its first draft of criterion 1 also said the query matched six listings; when we ran it, it matched ten.
 - _What I changed:_ Reworded tools wording and criteria to be more specific and checkable, and ensured the tests would actually catch what they claimed to. Testing caught "something in size M" taking the wrong branch.
 
+**Moment 3 (unit 4): checking an all-PASS run instead of accepting it**
+
+- _What I asked for:_ I ran the before test myself and asked Claude to score it against my criteria.
+- _What came back:_ The checker said 25 of 25 tries passed. Claude didn't take that at face value. It checked that caching was really off (80 model calls, five different fit cards per scenario), then read the outfit and fit-card text. It found that criterion 5's phrase list missed the exact slip my own reason quotes. The model writes "you *probably* already own", and I'd only banned "you already", so 3 of 5 outfits made the claim and passed. Criterion 4's "not for sale" check only knew two phrasings, while 7 of 40 cards read as the poster selling the item ("I just listed on Poshmark").
+- _What I decided:_ to revise both checks, as "measured the wrong thing", keeping the original lines and putting the new check and the reason underneath. I kept the targets as they were. Re-scored, criterion 5 was MISSED (2/5), which gave me a real miss to diagnose instead of a clean sheet with nothing to learn from.
+
+**Moment 4 (unit 4): measuring what a fix cost, not just what it fixed**
+
+- _What I asked for:_ Two prompt fixes, each pointed at a diagnosed failure: the empty-wardrobe prompt in `suggest_outfit`, then the `create_fit_card` prompt.
+- _What came back:_ Both fixed what they targeted. Criterion 5 went from 2/5 to 5/5, and for-sale cards went from 9 of 80 to 0 of 40. But checking the raw output showed the costs. 4 of 5 outfits copied the example pieces from my new prompt word for word, and after the fit-card fix, 39 of 40 captions opened with "Score…". Claude also pointed out that criterion 4 moving from 4/5 to 5/5 after improvement 1 couldn't have been caused by that fix, since `create_fit_card` wasn't touched. It was just the model varying.
+- _What I changed:_ I reported both side effects and the variance in The Improvement and What's Still Broken instead of claiming clean wins. I also decided against a third prompt change, because each concrete instruction I'd added had narrowed the output somewhere else.
+
 ## Stretch Features
 
 <!-- Declared here, and committed, before any of it was built. -->
@@ -665,6 +677,32 @@ Overall it fixed what it targeted, at the cost of variety I care about, and with
      you did. "I ran out of time" is fine if it's true. Pretending nothing is
      left is not. -->
 
+**No criterion is missed in the final run**, but that doesn't mean nothing is broken. Criterion 4 is at 4/5 with no margin, and the three runs showed problems my criteria don't measure. In order of how much they matter:
+
+**1. Criterion 4 has no margin: a price written in words.** In the after2 run, one fit card said "for just nineteen bucks" instead of `$19`. It's 1 card in 120 across three runs, and it's the only one, so I can't tell whether improvement 2's prompt caused it.
+- _What I'd do:_ check it in code, not in the prompt. If `create_fit_card`'s output doesn't contain the price as `$N`, regenerate once. The other option is to write the price into the caption myself. A third prompt rule might get followed, but every concrete instruction I've added so far has also narrowed the output (see 2 and 3).
+- _Why I stopped:_ the unit allows one improvement, plus a second as a stretch, and I've used both. A third change would need its own measured run.
+
+**2. Improvement 2 made the captions nearly identical.** 39 of 40 after2 cards open with "Score…", and 38 of 40 say "obsessed" in the first sentence. Before, it was 9 and 24. The phrase "just bought it… showing off what they found" handed the model one obvious opener.
+- _What I'd do:_ keep "they are the buyer, not the seller", which is the part that fixed the for-sale problem, and drop "showing off what they found". Then measure variety with a criterion I can actually score, e.g. "across 5 cards for the same item, no two share their first three words, in 4 of 5 runs".
+- _Why I stopped:_ no criterion measures variety. Adding one now, after seeing results, would be a new criterion for next time, not a revision. Changing the prompt again would be a third improvement.
+
+**3. Improvement 1's example pieces get copied.** 4 of the 5 after-run empty-wardrobe outfits use "black straight-leg jeans" and/or "white low-top sneakers", the two pieces I gave as examples of naming by type and color.
+- _What I'd do:_ remove the examples and keep the instruction ("name each piece by type and color"). Then count how many outfits contain the prompt's own example strings.
+- _Why I stopped:_ same as above. The fix for criterion 5 worked, and this is a side effect no criterion checks.
+
+**4. A busy model ends the run instead of waiting.** In a 1-try smoke run before the test, 2 of 8 model-calling runs stopped on `503 UNAVAILABLE` ("This model is currently experiencing high demand"). `generate.py` only retries 429 rate limits, so a 503 becomes `ModelUnavailable`. My handler then stops the run cleanly with a message, but stops it all the same. None of the three graded runs hit a 503 (240 model calls, 0 outages), which is why criterion 1 shows 5/5 every time.
+- _What I'd do:_ treat 503 / `UNAVAILABLE` like a rate limit in `generate.py`'s retry loop, backing off and trying again. To test it, force one 503 with a fake exception, because I can't make the real service busy on demand.
+- _Why I stopped:_ I couldn't measure it with a real run. No outage happened in any of them, so a before and after would look identical whether the fix worked or not.
+
+**5. One tool's invention becomes the next tool's fact.** In the before run, `suggest_outfit` added advice nobody asked for ("$42 is a little steep for Poshmark—try offering $30!"). `create_fit_card` then wrote "I definitely low-balled her to $30 first", a claim about something that never happened. `create_fit_card` gets the whole outfit text, so anything the first call makes up, the second can repeat as true. Across 120 runs, haggling advice showed up in 3 outfits, and it reached a fit card once.
+- _What I'd do:_ pass `create_fit_card` only the pieces from the outfit, not the whole chatty answer. Then add a criterion: "the fit card mentions no dollar amount except the item's price, 5 of 5".
+- _Why I stopped:_ it happened once in 120. A run of 5 tries would almost never catch it, so I couldn't measure a fix with this setup.
+
+**6. My revised criterion 4 check has a false positive.** The `"my poshmark"` pattern flagged "Score one for my **Poshmark cart** because this … jacket is finally mine", which is a buyer talking. It didn't change any verdict, because that card was in criterion 5's tries, not criterion 4's.
+- _What I'd do:_ narrow the pattern to the shop sense ("on my poshmark", "my poshmark shop/closet/page") and note it as a second revision under criterion 4, with the original and the first revision left in place.
+- _Why I stopped:_ it affected no scored try, and revising a check again right after it flagged something felt like the kind of tuning the criteria rules warn about. I'd rather record it here and fix it at the start of the next round of tests.
+
 <!-- ═════════════════════════════════════════════════════════════════════
 
      SUBMISSION CHECKLIST — unit 3
@@ -682,17 +720,17 @@ Overall it fixed what it targeted, at the cost of variety I care about, and with
 
      SUBMISSION CHECKLIST — unit 4
 
-       [ ] mcp_server.py exists with one tool registered
+       [x] mcp_server.py exists with one tool registered
            (or a written record of exactly where the rewire broke)
-       [ ] Run Log — Before, five criteria, five tries each
-       [ ] Real output pasted underneath, naming file and function
-       [ ] A verdict on every criterion
-       [ ] A diagnosis for every miss, naming a place AND a mechanism
-       [ ] Loop Trace, with the MCP call visible in it
-       [ ] All three failure modes triggered and handled
-       [ ] One improvement, with Run Log — After in the same format
-       [ ] What's Still Broken
-       [ ] At least four new commits
+       [x] Run Log — Before, five criteria, five tries each
+       [x] Real output pasted underneath, naming file and function
+       [x] A verdict on every criterion
+       [x] A diagnosis for every miss, naming a place AND a mechanism
+       [x] Loop Trace, with the MCP call visible in it
+       [x] All three failure modes triggered and handled
+       [x] One improvement, with Run Log — After in the same format
+       [x] What's Still Broken
+       [x] At least four new commits
        [ ] The SAME repository URL as last unit
 
      Do not delete and recreate this repository. Your commit history is what
