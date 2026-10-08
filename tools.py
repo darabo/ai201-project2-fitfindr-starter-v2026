@@ -240,10 +240,13 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
         return "Can't write a fit card without an outfit suggestion — suggest_outfit returned nothing."
 
     prompt = (
-        f"Write a 2-4 sentence social media caption for this thrift find.\n\n"
+        f"Write a 2-4 sentence social media caption for this thrift find. "
+        f"The person posting just bought it on {new_item['platform']} and is "
+        f"showing off what they found and how they'd wear it. It's theirs "
+        f"now. They are the buyer, not the seller.\n\n"
         f"Item: {new_item['title']}\n"
-        f"Price: ${new_item['price']:.2f}\n"
-        f"Platform: {new_item['platform']}\n"
+        f"Price they paid: ${new_item['price']:.2f}\n"
+        f"Platform they bought it on: {new_item['platform']}\n"
         f"How it's styled: {outfit}\n\n"
         "Rules: sound like a real person posting, not a product listing. "
         "Mention the item, the price, and the platform once each. Be specific "
