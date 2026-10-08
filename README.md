@@ -217,6 +217,32 @@ for q in ['something in size M under \$30', 'designer ballgown size XXS under \$
 
 The second branch stops before `search_listings`. The empty-search branch stops after it. The happy path runs all three tools.
 
+### Unit 4 stretch features
+
+<!-- Declared and committed before either was built, and before the "before" test run. -->
+
+**Declared: retry with looser constraints.**
+
+- **Condition:** `search_listings` returns `[]` and the query had a size. Without a size, there's nothing to loosen and the empty-search branch runs exactly as it does now.
+- **Path taken:** the loop calls `search_listings` once more through MCP with the same description and max price but `size=None`. It retries once, and only the size is dropped. Price and description never change, because those are what the user would notice being ignored.
+  - **If the retry finds something,** the loop carries on with the first result. The output says the size was dropped, e.g. _"Nothing in size XXS, so I searched without the size filter."_
+  - **If the retry finds nothing too,** the loop stops before `suggest_outfit` the same way the empty-search branch does. The message says the size was already dropped, so it no longer tells the user to "drop the size filter" for something that didn't help.
+- **How it shows up:** the trace gets a second search step, `search_listings (via MCP, retry without size)`, and the session records `session["dropped"] = ["size"]` so the run log can show which constraint was dropped.
+- **What it changes:** `agent.py::run_agent` (a retry between the search and the empty-search check), `agent.py::_no_results_message` (no "drop the size" tip once the size has been dropped), and `app.py::_ask_one` (prints the dropped-constraint notice above `Found:`).
+- **When it's built:** before `run_eval.py --label before`, so the before and after run logs measure the same agent. The impossible query in criterion 2 (`designer ballgown size XXS under $5`) still matches nothing without the size filter, so it still stops with 0 model calls.
+
+_Status: declared, not built._
+
+**Declared: a second measured improvement.**
+
+- **What:** after the first improvement and its after run, I'll make a second change pointed to by the diagnosis in Verdicts and Diagnoses. It will be a different miss, or the same miss if the first change didn't fix it.
+- **How it's measured:** the same way as the first. `python run_eval.py --label after2`, a third run log in the same table format, and a statement of whether it helped and how I know.
+- **One change at a time:** the second change starts from the agent as it stands after the first improvement, so each run log differs from the one before it by exactly one change.
+
+_Status: declared, not built._
+
+**Not attempted: a second tool on MCP.** The two tools left both call the model. Over MCP, a bad key would reach the agent as an `MCPError` instead of a `ModelUnavailable`, and my handler for it would stop working. Every call also starts a fresh server process, so the rate limiter and call counter would reset on each call. That's a lot of risk for one point.
+
 ---
 
 <!-- ═══════════════════════ UNIT 4 — THE TEST ═══════════════════════
