@@ -382,22 +382,77 @@ that produced it:
      the same length, your branch isn't working — and this is the fastest way
      anyone will ever find that out. -->
 
-**Happy path**
+Traces come from `trace.step()` calls in `agent.py::run_agent`. Step [2] is the MCP call: `search_listings` runs in `mcp_server.py` and is reached through `mcp_client.call_tool`.
+
+**Happy path** (caching off, so both model calls are real):
 
 ```
+$ AI201_CACHE=0 python app.py ask 'vintage graphic tee under $30' --trace
+[1] parse_query
+      in:  vintage graphic tee under $30
+      out: {'description': 'vintage graphic tee', 'size': None, 'max_price': 30.0}
+[2] search_listings (via MCP)
+      in:  {'description': 'vintage graphic tee', 'size': None, 'max_price': 30.0}
+      out: 10 items: Vintage Band Tee — Faded Grey, Graphic Tee — 2003 Tour Bootleg Style, Y2K Baby Tee — Butterfly Print … +7 more
+      →    10 match(es)
+[3] select_item
+      out: Vintage Band Tee — Faded Grey ($19.0, depop)
+[4] suggest_outfit
+      in:  Vintage Band Tee — Faded Grey ($19.0, depop)
+      out: Hey friend! That vintage band tee is a total thrift score and will fit right into your wardrobe. At nineteen b…
+[5] create_fit_card
+      in:  Vintage Band Tee — Faded Grey ($19.0, depop)
+      out: Still can’t believe I found this faded grey vintage band tee on Depop for just $19. It has the absolute best w…
 
+  Found:    Vintage Band Tee — Faded Grey — $19.0 on depop
+
+  Outfit:   Hey friend! That vintage band tee is a total thrift score and will fit right into your wardrobe. At nineteen bucks, it is a steal for that grunge look. Here are two easy ways to style it using what you already own:
+
+Outfit 1: Effortless Streetwear
+Tuck the vintage band tee into your baggy straight-leg jeans, add the brown leather belt, and finish it off with the chunky white sneakers and black crossbody bag. 
+
+Outfit 2: Edgy Grunge
+Layer your vintage black denim jacket right over the vintage band tee, pair with the wide-leg khaki trousers and black combat boots, and throw on the black crossbody bag to complete the vibe. 
+
+You are going to look amazing!
+
+  Fit card: Still can’t believe I found this faded grey vintage band tee on Depop for just $19. It has the absolute best worn-in grunge vibe, whether you style it with baggy denim or wide-leg trousers. Go grab it before I change my mind! 🖤🤘 #thriftscore #depopfinds
+
+2 model calls this session, 508 prompt + 214 output tokens
 ```
 
-**Empty search**
+**Empty search** (3 steps against the happy path's 5, because the branch stops it after the search):
 
 ```
+$ python app.py ask 'designer ballgown under $5' --trace
+[1] parse_query
+      in:  designer ballgown under $5
+      out: {'description': 'designer ballgown', 'size': None, 'max_price': 5.0}
+[2] search_listings (via MCP)
+      in:  {'description': 'designer ballgown', 'size': None, 'max_price': 5.0}
+      out: [] (empty)
+      →    0 match(es)
+[3] branch
+      →    search returned []: stopping before suggest_outfit
 
+  No listings matched 'designer ballgown' under $5. Try to raise your max price above $5, or use broader words (e.g. 'jacket' or 'tee' instead of a specific style).
+
+0 model calls this session
 ```
 
-**On the MCP move:** <!-- what changed in your code, and whether anything
-behaved differently afterwards. If the rewire didn't work, say exactly where it
-broke — the error text and the last thing that worked. That earns the point in
-full. -->
+This query has no size, so it shows the plain empty-search branch. With a size, the retry stretch adds a second MCP search before the branch. Traces of both retry outcomes are under Stretch Features.
+
+**On the MCP move:** `search_listings` is registered in `mcp_server.py` with typed inputs (`description: str`, `size: str | None`, `max_price: float | None`) and a description that states the units, the size-matching rule, the fields each listing has, and that an empty result is `[]`. In `agent.py::run_agent`, the direct `search_listings(**session["parsed"])` became `call_tool("search_listings", {...})`, and the direct import was removed so nothing can bypass the server. Nothing behaved differently in the results. On five inputs (`graphic tee` ≤ $30, `vintage graphic tee` size M ≤ $30, `ballgown` XXS ≤ $5, `denim jacket` with no filters, and an empty description), the MCP result was `==` to the direct call every time, including the two empty lists. That means the tool was already returning plain JSON-friendly dicts, with no hidden types to lose on the way through. The one thing that did change is speed. Each call starts the server process, so a search went from about 0.4 ms to about 280 ms. That's unnoticeable next to the model calls, but it's the cost of the seam.
+
+### Failure modes, triggered on purpose
+
+| Failure | How I triggered it | What the agent said |
+| --- | --- | --- |
+| Empty search | `python app.py ask 'designer ballgown under $5'` | "No listings matched 'designer ballgown' under $5. Try to raise your max price above $5, or use broader words (e.g. 'jacket' or 'tee' instead of a specific style)." Stops before `suggest_outfit`, 0 model calls. Already handled in unit 3. |
+| Empty wardrobe | `AI201_CACHE=0 python app.py ask 'denim jacket under $50' --empty-wardrobe` | Two outfits built from common basics ("Since I don't know your closet yet, here are two foolproof ways to style it…"), then a fit card. No crash, no empty string. Already handled in unit 3 by `tools.py::suggest_outfit`. |
+| Model unavailable | Invalid `GEMINI_API_KEY`, caching off, a query not run before: `'black leather jacket'` | **Before the handler:** `ModelUnavailable: The model rejected your API key. Check GEMINI_API_KEY in your .env file, or create a fresh key at aistudio.google.com.` and exit code 1. `app.py` caught it, so there was no stack trace, but the run crashed and the item it found was lost. **After:** "Found 90s Leather Bomber — Black ($75 on depop), but couldn't reach the model to suggest an outfit. The model rejected your API key. Check GEMINI_API_KEY in your .env file, or create a fresh key at aistudio.google.com. Then run the same query again." |
+
+The handler is `agent.py::_stop_model_unavailable`, called from `except ModelUnavailable` around both model tools in `run_agent`. It sets `session["error"]`, keeps `selected_item`, and adds a trace step saying where the run stopped.
 
 ---
 
