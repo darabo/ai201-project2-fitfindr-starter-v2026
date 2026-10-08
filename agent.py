@@ -17,8 +17,9 @@ import re
 
 import config
 import trace
-from tools import search_listings, suggest_outfit, create_fit_card, _keywords
+from tools import suggest_outfit, create_fit_card, _keywords
 from generate import ModelUnavailable
+from mcp_client import call_tool
 
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -191,10 +192,15 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         session["steps"].append("stop: query too vague")
         return session
 
-    # Step 2 — search.
+    # Step 2 — search, through the MCP server (mcp_server.py) rather than a
+    # direct call. was: search_listings(**session["parsed"])
     count += 1
     trace.check_iterations(count)
-    session["search_results"] = search_listings(**session["parsed"])
+    session["search_results"] = call_tool("search_listings", {
+        "description": session["parsed"]["description"],
+        "size": session["parsed"]["size"],
+        "max_price": session["parsed"]["max_price"],
+    })
     session["steps"].append("search_listings")
 
     # THE BRANCH: nothing found → explain what to change and stop here.
