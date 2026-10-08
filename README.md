@@ -323,19 +323,88 @@ _Status: declared, not built._
      `python run_eval.py --label before` runs everything and writes the table
      into results/. Paste it here and fill in the verdicts. -->
 
+`python run_eval.py --label before`: 9 scenarios, 5 tries each, caching off, temperature 0.9, 80 model calls, no crashes. Raw output is in `results/run_2026-10-07_2141_before.md`, and the PASS/FAIL cells come from `python check_criteria.py` (`results/run_2026-10-07_2141_before_checked.md`), which applies `criteria.md` as written and gives the reason for every FAIL. I checked each FAIL against the raw output by hand.
+
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 | --------- | ------ | ----- | ----- | ----- | ----- | ----- | ------- |
-| 1.        |        |       |       |       |       |       |         |
-| 2.        |        |       |       |       |       |       |         |
-| 3.        |        |       |       |       |       |       |         |
-| 4.        |        |       |       |       |       |       |         |
-| 5.        |        |       |       |       |       |       |         |
+| 1. A matching query completes all three tools | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. An impossible query stops before the second tool | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. The searched item is the item each tool receives | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 4. Fit card has price, platform, ≤70 words, not selling (revised) | 4 of 5 | PASS | FAIL | PASS | PASS | PASS | MET (4/5) |
+| 5. The empty wardrobe doesn't invent a closet (revised) | 4 of 5 | FAIL | FAIL | PASS | PASS | FAIL | MISSED (2/5) |
 
-**Real output from one try**, pasted as text, naming the file and function
-that produced it:
+Criteria 4 and 5 are scored with the revised checks in `criteria.md` (originals left in place, reasons underneath). For comparison, the same tries scored with the original checks:
+
+| Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
+| --------- | ------ | ----- | ----- | ----- | ----- | ----- | ------- |
+| 4. (as originally written) | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 5. (as originally written) | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+
+Criterion 3 is five different queries, once each, so its tries are try 1 of `vintage graphic tee under $30`, `denim jacket`, `y2k top size S`, `chunky sneakers under $60`, and `leather bag`. Each query also ran four more times, and those 20 extra tries all passed too.
+
+**Real output from one try per criterion**, pasted as text:
+
+Criterion 1, try 1. The fit card is from `tools.py::create_fit_card`, called by `agent.py::run_agent`, run by `run_eval.py::run_once`:
 
 ```
+selected_item: Vintage Band Tee — Faded Grey ($19.0, depop)   model calls: 2
 
+Still can’t believe I scored this faded grey vintage band tee for just $19 on depop. It’s got that 90s grunge feel nailed, whether you’re pairing it with baggy denim and boots or keeping it chill with khakis. 🎸🖤
+
+#thrifted #depopfinds
+```
+
+Criterion 2, try 1. The message is from `agent.py::_no_results_message` and the trace is from `trace.step()` calls in `agent.py::run_agent`:
+
+```
+[1] parse_query
+      in:  designer ballgown size XXS under $5
+      out: {'description': 'designer ballgown', 'size': 'XXS', 'max_price': 5.0}
+[2] search_listings (via MCP)
+      in:  {'description': 'designer ballgown', 'size': 'XXS', 'max_price': 5.0}
+      out: [] (empty)
+      →    0 match(es)
+[3] search_listings (via MCP, retry without size)
+      in:  {'description': 'designer ballgown', 'size': None, 'max_price': 5.0}
+      out: [] (empty)
+      →    dropped size XXS: 0 match(es)
+[4] branch
+      →    search returned []: stopping before suggest_outfit
+
+No listings matched 'designer ballgown' under $5, even without the size XXS filter. Try to raise your max price above $5, or use broader words (e.g. 'jacket' or 'tee' instead of a specific style).
+fit_card: None   model calls: 0
+```
+
+Criterion 3, the `denim jacket` try. These are session fields set in `agent.py::run_agent`:
+
+```
+search_results[0]["id"]: lst_007
+selected_item["id"]:     lst_007
+tool_inputs:             {'suggest_outfit': 'lst_007', 'create_fit_card': 'lst_007'}
+```
+
+Criterion 4, try 2 (the FAIL), from `tools.py::create_fit_card`:
+
+```
+Still obsessed with this faded grey vintage band tee I just dropped on depop for $19. It’s got that 100% authentic, perfectly broken-in grunge vibe you can't fake. Grab it before I change my mind and keep it for myself! 🖤🎸
+
+#vintagestyle #depopseller
+```
+
+Criterion 5, try 1 (a FAIL). The outfit is from `tools.py::suggest_outfit` (empty-wardrobe branch) and the card is from `tools.py::create_fit_card`:
+
+```
+selected_item: Denim Jacket — Light Wash, Cropped ($42.0, poshmark)
+
+Outfit: Hey there! That Wrangler jacket is a total score, but $42 is a little steep for Poshmark—try offering $30! Since it’s cropped and vintage, here are two easy ways to style it with things you probably already own.
+
+Outfit one: Casual streetwear. Toss it over a basic white baby tee, pair with high-waisted black straight-leg jeans, and finish with your favorite retro sneakers (like Converse or Adidas).
+
+Outfit two: Cute and effortless. Layer it on top of a simple black ribbed midi dress, add comfy white ankle socks, and chunky loafers or combat boots.
+
+Both are super comfy and let that vintage denim do all the talking!
+
+Fit card: Found this little vintage cropped denim jacket on Poshmark for $42 and I'm obsessed, though I definitely low-balled her to $30 first. It’s giving effortless 90s streetwear whether you throw it over a baby tee or a ribbed midi dress. Let the jacket do all the talking. 🫶✨ #thriftfinds #poshmarkstyle
 ```
 
 ---
@@ -360,13 +429,29 @@ that produced it:
 
 | #   | Criterion | Target | Verdict | How I decided |
 | --- | --------- | ------ | ------- | ------------- |
-| 1   |           |        |         |               |
-| 2   |           |        |         |               |
-| 3   |           |        |         |               |
-| 4   |           |        |         |               |
-| 5   |           |        |         |               |
+| 1   | A matching query completes all three tools | 4 of 5 | MET (5/5) | All five tries printed a `Found:` item and a non-empty fit card, with 2 model calls each and no crash. 5 ≥ 4. |
+| 2   | An impossible query stops before the second tool | 5 of 5 | MET (5/5) | All five said no listings matched, named a change (raise the price or use broader words), left `fit_card` as `None`, and made 0 model calls. The trace shows the retry ran and also found nothing before the branch stopped the run. |
+| 3   | The searched item is the item each tool receives | 5 of 5 | MET (5/5) | For all five queries, `search_results[0]`, `selected_item`, and both `tool_inputs` were the same id (`lst_033`, `lst_007`, `lst_017`, `lst_019`, `lst_039`). The 20 unscored repeat tries matched too. |
+| 4   | Fit card has price, platform, ≤70 words, not selling (revised) | 4 of 5 | MET (4/5) | All five cards had `$19`, "depop", and 34–42 words. Try 2 failed the revised check 4 ("I just dropped on depop… Grab it before I change my mind and keep it for myself!"). 4 ≥ 4, so it's met, with no room left for another miss. As originally written: 5/5. |
+| 5   | The empty wardrobe doesn't invent a closet (revised) | 4 of 5 | **MISSED (2/5)** | All five returned a fit card for the same $42 jacket (≤ $50). Tries 1, 2 and 5 said the user "probably/likely already own[s]" the basics. 2 < 4. As originally written it was 5/5, but that check missed this exact phrasing (see the revision in `criteria.md`). |
 
 **Diagnoses**
+
+**Criterion 5 — MISSED (2/5). Place: the model's output, from the prompt in `tools.py::suggest_outfit` (empty-wardrobe branch).**
+
+The other parts all worked. The search returned the same $42 jacket every time, the branch went on to `suggest_outfit`, the session carried `lst_007` through, and checks 1 and 3 passed 5/5. All three failures are one sentence, the line that introduces or wraps up the outfits:
+
+- try 1: "here are two easy ways to style it with things you probably already own"
+- try 2: "here are two easy, everyday outfits using basics you likely already own"
+- try 5: "Both are super easy to pull off with basics you probably already own!"
+
+The mechanism is in the prompt. The empty-wardrobe prompt tells the model "They haven't told you what else they own" and then asks for "two outfits built around this item using common basics". It says the wardrobe is unknown, then asks for outfits made of things the model has to assume are in it. Nothing says not to assume. The model fills that gap the friendly way: the basics are "things you probably already own", so the user doesn't have to buy more. The system prompt ("a friendly, practical thrift stylist") pushes the same way. It's one problem showing up in three tries, not three problems. It's also the slip I saw in unit 3 and wrote this criterion to catch.
+
+**Criterion 4: met, but the same kind of problem shows up across the whole run.** Criterion 4 had one FAIL in five and still made its target, so it isn't a miss. Across every fit card in the run, though, 7 of 40 present the item as the poster's to sell: "I just dropped on depop", "I just listed on Poshmark", "listed over on my Poshmark", and, in 6 of the 7, "Grab it before I change my mind and keep it". One even tagged itself `#depopseller`. **Place:** the model's output, from the prompt in `tools.py::create_fit_card`. **Mechanism:** the prompt gives the model a price and a platform and says "sound like a real person posting". It never says who owns the item, or that the poster bought it. A post with a price and a shop name is what a seller's post looks like, so about 1 in 6 times the model writes that version. At that rate, a 4-of-5 target will sometimes miss just by chance. This run happened to land only one in criterion 4's five.
+
+**Also seen, not a criterion: one tool's invention becomes the next tool's fact.** In criterion 5 try 1, `suggest_outfit` added advice I never asked for ("$42 is a little steep for Poshmark—try offering $30!"). `create_fit_card` then wrote "I definitely low-balled her to $30 first", which is a claim about something that never happened. `create_fit_card` gets the whole outfit text as "How it's styled", so whatever the first model call invents, the second one repeats as true. No criterion checks for this. I'm noting it for What's Still Broken.
+
+**Targets that may be too low.** Criterion 1 allowed one miss for a model outage, and this run had none. 40 of 40 runs that called the model completed. I'd still keep 4 of 5. In a 1-try smoke run just before this test (not saved in `results/`), 2 of 8 model-calling runs stopped on `503 UNAVAILABLE` ("This model is currently experiencing high demand"). `generate.py` only retries 429 rate limits, so a 503 ends the run. The miss I allowed for is real, it just didn't happen this time.
 
 ---
 
