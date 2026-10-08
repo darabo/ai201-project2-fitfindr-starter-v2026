@@ -22,31 +22,62 @@ SCENARIOS = [
         "criterion": 1,
     },
     {
-        # A query nothing can match. Criterion 2 — the branch.
+        # A query nothing can match. Criterion 2 — the branch. It has a size,
+        # so the retry stretch also runs (and also finds nothing).
         "name": "impossible query stops early",
         "query": "designer ballgown size XXS under $5",
         "wardrobe": "example",
         "criterion": 2,
     },
+    # Criterion 3 — state. The criterion is five DIFFERENT queries, once each,
+    # so each query is its own scenario. check_criteria.py scores try 1 of each
+    # as that criterion's five tries; tries 2-5 are reported as extra data.
     {
-        # A user with nothing saved. One of unit 4's three failure modes.
-        "name": "empty wardrobe",
+        "name": "state: vintage graphic tee",
+        "query": "vintage graphic tee under $30",
+        "wardrobe": "example",
+        "criterion": 3,
+    },
+    {
+        "name": "state: denim jacket",
+        "query": "denim jacket",
+        "wardrobe": "example",
+        "criterion": 3,
+    },
+    {
+        "name": "state: y2k top size S",
+        "query": "y2k top size S",
+        "wardrobe": "example",
+        "criterion": 3,
+    },
+    {
+        "name": "state: chunky sneakers",
+        "query": "chunky sneakers under $60",
+        "wardrobe": "example",
+        "criterion": 3,
+    },
+    {
+        "name": "state: leather bag",
+        "query": "leather bag",
+        "wardrobe": "example",
+        "criterion": 3,
+    },
+    {
+        # Criterion 4 — the fit card. Same query five times, so the same item
+        # each time and only the model's wording varies.
+        "name": "fit card: price, platform, length, not selling",
+        "query": "vintage graphic tee under $30",
+        "wardrobe": "example",
+        "criterion": 4,
+    },
+    {
+        # Criterion 5 — a user with nothing saved. Also one of unit 4's three
+        # failure modes.
+        "name": "empty wardrobe doesn't invent a closet",
         "query": "denim jacket under $50",
         "wardrobe": "empty",
-        "criterion": None,
+        "criterion": 5,
     },
-    # TODO: add what your criteria 3, 4 and 5 need.
-    #
-    # Set "criterion" to the number in criteria.md that the scenario tests.
-    # "criterion": None means a diagnostic run — useful to have, but it isn't
-    # one of your five, and run_eval.py marks it as such in the table.
-    #
-    # For a state criterion, any normal query works — what you're checking is
-    # what ends up in the session, not what the user typed.
-    #
-    # For a fit-card criterion, you probably want the SAME query listed more
-    # than once, or several different items, depending on what your criterion
-    # actually says.
 ]
 
 WARDROBES = ("example", "empty")

@@ -50,12 +50,17 @@ def run_once(scenario, use_trace=True):
     if use_trace:
         trace_module.start_trace()
 
+    import generate
+
     record = {"error": None, "session": None, "trace": "", "crashed": None}
+    calls_before = generate.call_count()
     try:
         record["session"] = run_agent(scenario["query"], wardrobe)
     except Exception as exc:  # noqa: BLE001 — a crash is a result worth logging
         record["crashed"] = f"{type(exc).__name__}: {exc}"
         record["traceback"] = traceback.format_exc()
+    # Model calls this try made (criterion 2 checks for zero).
+    record["model_calls"] = generate.call_count() - calls_before
 
     if use_trace:
         record["trace"] = trace_module.get_trace()
@@ -202,10 +207,12 @@ def write_report(rows, args):
                 lines += ["Trace:", "", "```", record["trace"], "```", ""]
 
     path.write_text("\n".join(lines), encoding="utf-8")
+    json_path = _write_json(rows, args, path)
 
     import generate
 
     print(f"Wrote {path.relative_to(config.ROOT)}")
+    print(f"Wrote {json_path.relative_to(config.ROOT)}  (check_criteria.py reads this)")
     print(generate.usage())
     print("\nCommit this file. It's the evidence the test actually happened.")
 
@@ -215,6 +222,43 @@ def write_report(rows, args):
             "to run_agent() yet — that's Milestone 2, and the trace is required\n"
             "evidence worth a point."
         )
+
+
+def _write_json(rows, args, md_path):
+    """
+    The same run as data, next to the markdown, for check_criteria.py.
+    The wardrobe is left out of each session; it's the same every try.
+    """
+    import json
+
+    data = {
+        "label": args.label,
+        "tries": args.tries,
+        "temperature": config.TEMPERATURE,
+        "when": dt.datetime.now().isoformat(timespec="minutes"),
+        "scenarios": [
+            {
+                **row["scenario"],
+                "tries": [
+                    {
+                        "crashed": record["crashed"],
+                        "model_calls": record.get("model_calls"),
+                        "trace": record["trace"],
+                        "session": (
+                            {k: v for k, v in record["session"].items() if k != "wardrobe"}
+                            if record["session"] else None
+                        ),
+                    }
+                    for record in row["tries"]
+                ],
+            }
+            for row in rows
+        ],
+    }
+    json_path = md_path.with_suffix(".json")
+    json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str),
+                         encoding="utf-8")
+    return json_path
 
 
 if __name__ == "__main__":
